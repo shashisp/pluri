@@ -1,15 +1,18 @@
+import { ArrowRightLeft, Rows3 } from 'lucide-react'
 import type {
   AgentState,
+  Repo,
   TicketState,
   TicketWithAgents
 } from '@shared/types'
+import { Badge, StatusDot, Tag } from './ui'
 
 interface TicketBoardProps {
   tickets: TicketWithAgents[]
+  repos: Repo[]
   agentStates: Record<string, AgentState>
   ticketStates: Record<string, TicketState>
-  onSelectTicket: (ticketId: string) => void
-  onNewTicket: () => void
+  onSelectTicket: (id: string) => void
 }
 
 const COLUMNS: { state: TicketState; label: string }[] = [
@@ -19,84 +22,99 @@ const COLUMNS: { state: TicketState; label: string }[] = [
   { state: 'done', label: 'Done' }
 ]
 
-const DOT: Record<AgentState, string> = {
-  idle: 'bg-neutral-500',
-  working: 'bg-yellow-400 animate-pulse',
-  awaiting_mr: 'bg-blue-400',
-  mr_open: 'bg-green-500',
-  done: 'bg-green-500',
-  killed: 'bg-red-500',
-  error: 'bg-red-500'
-}
-
 export function TicketBoard({
   tickets,
+  repos,
   agentStates,
   ticketStates,
-  onSelectTicket,
-  onNewTicket
+  onSelectTicket
 }: TicketBoardProps): JSX.Element {
-  const stateOf = (t: TicketWithAgents): TicketState =>
-    ticketStates[t.id] ?? t.state
+  const repoName = (id: string): string => repos.find((r) => r.id === id)?.name ?? '?'
+  const stateOf = (t: TicketWithAgents): TicketState => ticketStates[t.id] ?? t.state
 
   return (
-    <div className="flex h-full flex-col overflow-hidden">
-      <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-2">
-        <h1 className="text-sm font-semibold">Tickets</h1>
-        <button
-          className="rounded bg-emerald-600 px-3 py-1 text-xs font-semibold text-white hover:bg-emerald-500"
-          onClick={onNewTicket}
-        >
-          + New ticket
-        </button>
-      </div>
+    <div className="pk-board">
+      {COLUMNS.map((col) => {
+        const items = tickets.filter((t) => stateOf(t) === col.state)
+        return (
+          <section key={col.state} className="pk-col">
+            <header className="pk-col__head">
+              <span className={`pk-col__dot pk-col__dot--${col.state}`} />
+              <span className="pk-col__label">{col.label}</span>
+              <span className="pk-col__count">{items.length}</span>
+            </header>
+            <div className="pk-col__body">
+              {items.map((t) => {
+                const s = stateOf(t)
+                const clickable = s === 'running' || s === 'awaiting_review' || t.agents.length > 0
+                const mrOpen = t.agents.filter(
+                  (a) => (agentStates[a.id] ?? a.state) === 'mr_open'
+                ).length
+                return (
+                  <div
+                    key={t.id}
+                    className={`pluri-card${clickable ? ' pluri-card--interactive' : ''}`}
+                    onClick={clickable ? () => onSelectTicket(t.id) : undefined}
+                  >
+                    <div className="pluri-card__body">
+                      <div className="pk-ticket__top">
+                        <span className="pk-ticket__id">{t.id.slice(0, 6).toUpperCase()}</span>
+                        {s === 'awaiting_review' && (
+                          <Badge variant="info" dot>
+                            review
+                          </Badge>
+                        )}
+                        {s === 'done' && (
+                          <Badge variant="success" dot>
+                            done
+                          </Badge>
+                        )}
+                        {s === 'draft' && <Badge variant="neutral">draft</Badge>}
+                        {s === 'running' && (
+                          <span className="pk-ticket__order">
+                            {t.orderingMode === 'producer_first' ? (
+                              <ArrowRightLeft size={12} />
+                            ) : (
+                              <Rows3 size={12} />
+                            )}
+                            {t.orderingMode === 'producer_first' ? 'producer-first' : 'concurrent'}
+                          </span>
+                        )}
+                      </div>
 
-      <div className="grid flex-1 grid-cols-4 gap-3 overflow-y-auto p-3">
-        {COLUMNS.map((col) => {
-          const colTickets = tickets.filter((t) => stateOf(t) === col.state)
-          return (
-            <div key={col.state} className="flex min-w-0 flex-col gap-2">
-              <div className="flex items-center justify-between px-1 text-xs font-medium uppercase tracking-wide text-neutral-500">
-                <span>{col.label}</span>
-                <span>{colTickets.length}</span>
-              </div>
+                      <div className="pk-ticket__title">{t.title}</div>
+                      {t.spec && <div className="pk-ticket__spec">{t.spec}</div>}
 
-              {colTickets.map((t) => (
-                <button
-                  key={t.id}
-                  onClick={() => onSelectTicket(t.id)}
-                  className="flex flex-col gap-2 rounded-lg border border-neutral-800 bg-neutral-900/40 p-3 text-left hover:border-neutral-700"
-                >
-                  <span className="truncate text-sm font-medium">{t.title}</span>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] text-neutral-600">
-                      {t.targetRepoIds.length} repo
-                      {t.targetRepoIds.length === 1 ? '' : 's'}
-                    </span>
-                    <div className="ml-auto flex items-center gap-1">
-                      {t.agents.map((a) => (
-                        <span
-                          key={a.id}
-                          title={`${a.repoName}: ${agentStates[a.id] ?? a.state}`}
-                          className={`h-2 w-2 rounded-full ${
-                            DOT[agentStates[a.id] ?? a.state]
-                          }`}
-                        />
-                      ))}
+                      <div className="pk-ticket__repos">
+                        {t.targetRepoIds.map((id) => (
+                          <Tag key={id}>{repoName(id)}</Tag>
+                        ))}
+                      </div>
+
+                      {t.agents.length > 0 && (
+                        <div className="pk-ticket__foot">
+                          <div className="pk-ticket__dots">
+                            {t.agents.map((a) => (
+                              <StatusDot key={a.id} state={agentStates[a.id] ?? a.state} />
+                            ))}
+                          </div>
+                          {s === 'running' && (
+                            <span className="pk-ticket__meta">{t.agents.length} agents</span>
+                          )}
+                          {s === 'awaiting_review' && (
+                            <span className="pk-ticket__meta">{mrOpen} MRs</span>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
-                </button>
-              ))}
-
-              {colTickets.length === 0 && (
-                <div className="rounded-lg border border-dashed border-neutral-900 px-2 py-4 text-center text-[11px] text-neutral-700">
-                  —
-                </div>
-              )}
+                )
+              })}
+              {items.length === 0 && <div className="pk-col__empty">—</div>}
             </div>
-          )
-        })}
-      </div>
+          </section>
+        )
+      })}
     </div>
   )
 }

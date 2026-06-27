@@ -11,6 +11,7 @@ import type {
   WorkspaceWithRepos
 } from '@shared/types'
 import { DEFAULT_SETTINGS } from '@shared/types'
+import { TopBar } from './components/TopBar'
 import { Sidebar } from './components/Sidebar'
 import { AgentSandbox } from './components/AgentSandbox'
 import { TicketBoard } from './components/TicketBoard'
@@ -156,53 +157,39 @@ export default function App(): JSX.Element {
   }
 
   return (
-    <div className="flex h-full flex-col bg-[#0a0a0a] text-neutral-200">
-      <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-2">
-        <div className="flex items-center gap-3">
-          <span className="text-sm font-semibold tracking-tight">Pluri</span>
-          <span className="text-xs text-neutral-500">
-            Multi-repo agent orchestrator
-          </span>
-        </div>
-        <div className="flex items-center gap-1 text-xs">
-          {(['board', 'sandbox'] as View[]).map((v) => (
-            <button
-              key={v}
-              className={`rounded px-2 py-1 ${
-                view === v
-                  ? 'bg-neutral-800 text-neutral-100'
-                  : 'text-neutral-500 hover:text-neutral-300'
-              }`}
-              onClick={() => setView(v)}
-            >
-              {v === 'board' ? 'Board' : 'Agent sandbox'}
-            </button>
-          ))}
-          <button
-            className="ml-1 rounded px-2 py-1 text-neutral-500 hover:text-neutral-300"
-            onClick={() => setShowSettings(true)}
-            title="Settings"
-          >
-            ⚙
-          </button>
-        </div>
-      </div>
+    <div className="pk-app">
+      <TopBar
+        workspaceName={selectedWs?.name ?? null}
+        ticketTitle={selectedTicket?.title ?? null}
+        onBack={() => {
+          setSelectedTicketId(null)
+          void refreshTickets(selectedWsId)
+        }}
+        view={view}
+        onSetView={setView}
+        canNewTicket={view === 'board' && !!selectedWs}
+        onNewTicket={() => setShowNewTicket(true)}
+        onOpenSettings={() => setShowSettings(true)}
+      />
 
-      <div className="grid min-h-0 flex-1 grid-cols-[260px_1fr]">
+      <div className="pk-body">
         <Sidebar
           workspaces={workspaces}
           selectedWsId={selectedWsId}
-          onSelect={selectWorkspace}
+          onSelectWorkspace={selectWorkspace}
           onChanged={refreshWorkspaces}
+          tickets={tickets}
+          agentStates={agentStates}
+          ticketStates={ticketStates}
+          selectedTicketId={selectedTicketId}
+          onSelectTicket={setSelectedTicketId}
         />
 
-        <div className="min-w-0 overflow-hidden">
+        <main className="pk-main">
           {view === 'sandbox' ? (
             <AgentSandbox />
           ) : !selectedWs ? (
-            <div className="flex h-full items-center justify-center text-sm text-neutral-600">
-              Select or create a workspace to begin.
-            </div>
+            <div className="pk-placeholder">Select or create a workspace to begin.</div>
           ) : selectedTicket ? (
             <TicketDetail
               ticket={selectedTicket}
@@ -224,15 +211,22 @@ export default function App(): JSX.Element {
               onOpenLink={(url) => void window.api.openExternal(url)}
             />
           ) : (
-            <TicketBoard
-              tickets={tickets}
-              agentStates={agentStates}
-              ticketStates={ticketStates}
-              onSelectTicket={setSelectedTicketId}
-              onNewTicket={() => setShowNewTicket(true)}
-            />
+            <>
+              <div className="pk-boardbar">
+                <span className="pk-boardbar__title">Tickets</span>
+                <div className="pk-detail__spacer" />
+                <span className="pk-detail__meta">{tickets.length} total</span>
+              </div>
+              <TicketBoard
+                tickets={tickets}
+                repos={selectedWs.repos}
+                agentStates={agentStates}
+                ticketStates={ticketStates}
+                onSelectTicket={setSelectedTicketId}
+              />
+            </>
           )}
-        </div>
+        </main>
       </div>
 
       {showNewTicket && selectedWs && (

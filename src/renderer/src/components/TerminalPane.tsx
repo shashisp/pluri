@@ -26,11 +26,25 @@ export function TerminalPane({ agentId }: TerminalPaneProps): JSX.Element {
       convertEol: false,
       cursorBlink: false,
       disableStdin: true,
-      fontFamily:
-        'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+      fontFamily: "'Geist Mono', ui-monospace, 'SF Mono', Menlo, monospace",
       fontSize: 12,
+      lineHeight: 1.45,
       scrollback: 8000,
-      theme: { background: '#0a0a0a', foreground: '#e5e5e5', cursor: '#0a0a0a' }
+      theme: {
+        background: '#0a0a0b',
+        foreground: '#b6bbc2',
+        cursor: '#0a0a0b',
+        black: '#0a0a0b',
+        red: '#ff6b62',
+        green: '#43c95a',
+        yellow: '#f5b13c',
+        blue: '#4ea1ff',
+        magenta: '#a893f7',
+        cyan: '#6fb6ff',
+        white: '#dde0e4',
+        brightBlack: '#6b6f76',
+        brightWhite: '#f1f2f4'
+      }
     })
     const fit = new FitAddon()
     term.loadAddon(fit)
@@ -94,9 +108,5 @@ export function TerminalPane({ agentId }: TerminalPaneProps): JSX.Element {
     }
   }, [agentId])
 
-  return (
-    <div className="h-full w-full overflow-hidden bg-[#0a0a0a] p-2">
-      <div ref={containerRef} className="h-full w-full" />
-    </div>
-  )
+  return <div ref={containerRef} className="pk-term__inner" />
 }

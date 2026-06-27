@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
+import { Play, Square } from 'lucide-react'
 import type { AgentState, AgentStateMsg } from '@shared/types'
 import { TerminalPane } from './TerminalPane'
-import { StatusDot } from './StatusDot'
+import { AGENT_STATE_LABEL, Button, Input, StatusDot, Textarea } from './ui'
 
-// Phase 1 harness: spawn a single agent and watch it stream. Kept as a dev
-// sandbox now that the real flow (tickets -> N agents) arrives in Phase 3.
+// Dev sandbox: spawn a single read-only agent and watch it stream.
 const DEFAULT_CWD = '/Users/shashikumarp/sideprojects/pluri'
 const DEFAULT_PROMPT =
   'Read the files in this repository and give me a concise summary of what it does, its tech stack, and its entry points. Do not modify anything.'
@@ -55,66 +55,67 @@ export function AgentSandbox(): JSX.Element {
   }
 
   return (
-    <div className="grid h-full grid-cols-[340px_1fr] overflow-hidden">
-      <div className="flex flex-col gap-3 overflow-y-auto border-r border-neutral-800 p-4">
-        <div className="flex items-center justify-between">
-          <span className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
-            Agent sandbox
-          </span>
-          <StatusDot state={state} />
+    <div className="pk-detail">
+      <div className="pk-detail__bar">
+        <div className="pk-detail__title">
+          <h1>Agent sandbox</h1>
         </div>
+        <div className="pk-pane__state">
+          <StatusDot state={state} />
+          <span className="pk-pane__statelbl">{AGENT_STATE_LABEL[state]}</span>
+        </div>
+      </div>
 
-        <label className="flex flex-col gap-1">
-          <span className="text-xs font-medium text-neutral-400">Repo path (cwd)</span>
-          <input
-            className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs outline-none focus:border-neutral-500"
-            value={cwd}
-            onChange={(e) => setCwd(e.target.value)}
-            spellCheck={false}
-          />
-        </label>
-
-        <label className="flex flex-col gap-1">
-          <span className="text-xs font-medium text-neutral-400">Prompt</span>
-          <textarea
-            className="h-40 resize-none rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs outline-none focus:border-neutral-500"
+      <div style={{ display: 'grid', gridTemplateColumns: '340px 1fr', flex: 1, minHeight: 0 }}>
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 14,
+            padding: 16,
+            borderRight: '1px solid var(--border-subtle)',
+            overflowY: 'auto'
+          }}
+        >
+          <Input label="Repo path (cwd)" value={cwd} onChange={(e) => setCwd(e.target.value)} mono />
+          <Textarea
+            label="Prompt"
+            rows={7}
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            spellCheck={false}
           />
-        </label>
-
-        <div className="flex gap-2">
-          <button
-            className="flex-1 rounded bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
-            onClick={handleSpawn}
-            disabled={running || !cwd.trim() || !prompt.trim()}
-          >
-            {running ? 'Running…' : 'Spawn agent'}
-          </button>
-          <button
-            className="rounded bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-40"
-            onClick={handleKill}
-            disabled={!running}
-          >
-            Kill
-          </button>
-        </div>
-
-        <div className="mt-1 text-xs text-neutral-500">
-          <div>
-            agent: <span className="text-neutral-300">{agentId ?? '—'}</span>
+          <div className="pk-addform__row">
+            <Button
+              variant="primary"
+              block
+              icon={<Play size={13} />}
+              onClick={handleSpawn}
+              disabled={running || !cwd.trim() || !prompt.trim()}
+            >
+              {running ? 'Running…' : 'Spawn agent'}
+            </Button>
+            <Button
+              variant="danger"
+              icon={<Square size={13} />}
+              onClick={handleKill}
+              disabled={!running}
+            >
+              Kill
+            </Button>
+          </div>
+          <div className="pk-form__hint">
+            agent: <span style={{ color: 'var(--text-secondary)' }}>{agentId ?? '—'}</span>
           </div>
           {detail && (
-            <div className="mt-1 whitespace-pre-wrap break-words text-neutral-400">
+            <div className="pk-form__hint" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
               {detail}
             </div>
           )}
         </div>
-      </div>
 
-      <div className="min-w-0">
-        <TerminalPane agentId={agentId} />
+        <div className="pk-term" style={{ borderRadius: 0 }}>
+          <TerminalPane agentId={agentId} />
+        </div>
       </div>
     </div>
   )

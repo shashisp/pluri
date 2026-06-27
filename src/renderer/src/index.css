@@ -1,18 +1,25 @@
+/* Self-hosted Geist (UI) + Geist Mono (code/terminal) — offline, no CDN. */
+@import '@fontsource/geist-sans/latin-300.css';
+@import '@fontsource/geist-sans/latin-400.css';
+@import '@fontsource/geist-sans/latin-500.css';
+@import '@fontsource/geist-sans/latin-600.css';
+@import '@fontsource/geist-sans/latin-700.css';
+@import '@fontsource/geist-mono/latin-400.css';
+@import '@fontsource/geist-mono/latin-500.css';
+@import '@fontsource/geist-mono/latin-600.css';
+
 @import 'tailwindcss';
 @import '@xterm/xterm/css/xterm.css';
 
-html,
-body,
-#root {
-  height: 100%;
-  margin: 0;
-}
+/* Pluri design system (tokens + primitives + app shell). */
+@import './styles/pluri.css';
 
-body {
-  background-color: #0a0a0a;
-  color: #e5e5e5;
-  font-family:
-    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica,
-    Arial, sans-serif;
-  overflow: hidden;
+/* xterm fills the terminal well; keep its own background transparent so the
+   pane's inset surface shows through. */
+.pk-term .xterm,
+.pk-term .xterm-viewport {
+  background: transparent !important;
+}
+.pk-term .xterm-viewport::-webkit-scrollbar {
+  width: 8px;
 }

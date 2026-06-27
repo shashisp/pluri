@@ -1,10 +1,16 @@
 import { useState } from 'react'
-import type {
-  AgentState,
-  TicketState,
-  TicketWithAgents
-} from '@shared/types'
+import {
+  ArrowLeft,
+  CheckCircle2,
+  FileText,
+  GitFork,
+  GitPullRequest,
+  RotateCw,
+  SquareTerminal
+} from 'lucide-react'
+import type { AgentState, TicketState, TicketWithAgents } from '@shared/types'
 import { AgentPane } from './AgentPane'
+import { Badge, Button, EmptyState, Tabs } from './ui'
 
 interface TicketDetailProps {
   ticket: TicketWithAgents
@@ -13,7 +19,6 @@ interface TicketDetailProps {
   agentMrUrls: Record<string, string>
   agentErrors: Record<string, string>
   contractContent: string
-  /** True while a launch for this ticket is in flight. */
   launching: boolean
   onBack: () => void
   onKill: (agentId: string) => void
@@ -22,15 +27,6 @@ interface TicketDetailProps {
   onViewDiff: (agentId: string) => void
   onCreateMr: (agentId: string) => void
   onOpenLink: (url: string) => void
-}
-
-/** Column count for an N-pane responsive grid. */
-function columnsFor(n: number): number {
-  if (n <= 1) return 1
-  if (n <= 2) return 2
-  if (n <= 4) return 2
-  if (n <= 9) return 3
-  return 4
 }
 
 export function TicketDetail({
@@ -50,103 +46,138 @@ export function TicketDetail({
   onOpenLink
 }: TicketDetailProps): JSX.Element {
   const [tab, setTab] = useState<'agents' | 'contract'>('agents')
-  const cols = columnsFor(ticket.agents.length)
+
   const anyRunning = ticket.agents.some(
     (a) => (agentStates[a.id] ?? a.state) === 'working'
   )
+  const mrOpen = ticket.agents.filter(
+    (a) => (agentStates[a.id] ?? a.state) === 'mr_open'
+  ).length
   const launchDisabled = anyRunning || launching
 
   return (
-    <div className="flex h-full flex-col overflow-hidden">
-      <div className="flex items-center gap-3 border-b border-neutral-800 px-4 py-2">
-        <button
-          className="rounded px-2 py-1 text-xs text-neutral-400 hover:bg-neutral-800"
-          onClick={onBack}
-        >
-          ← Board
+    <div className="pk-detail">
+      <div className="pk-detail__bar">
+        <button className="pk-back" onClick={onBack} title="Back to board">
+          <ArrowLeft size={15} />
         </button>
-        <span className="truncate text-sm font-semibold">{ticket.title}</span>
-        <span className="rounded bg-neutral-800 px-2 py-0.5 text-[10px] text-neutral-400">
-          {ticketState.replace('_', ' ')}
+        <div className="pk-detail__title">
+          <span className="pk-ticket__id">{ticket.id.slice(0, 6).toUpperCase()}</span>
+          <h1>{ticket.title}</h1>
+        </div>
+        {ticketState === 'running' && (
+          <Badge variant="warning" dot>
+            running
+          </Badge>
+        )}
+        {ticketState === 'awaiting_review' && (
+          <Badge variant="info" dot>
+            awaiting review
+          </Badge>
+        )}
+        {ticketState === 'done' && (
+          <Badge variant="success" dot>
+            done
+          </Badge>
+        )}
+
+        <div className="pk-detail__spacer" />
+        <span className="pk-detail__meta">
+          <GitFork size={13} /> {ticket.agents.length} agents
         </span>
-
-        <div className="ml-3 flex gap-1 text-xs">
-          {(['agents', 'contract'] as const).map((t) => (
-            <button
-              key={t}
-              className={`rounded px-2 py-1 ${
-                tab === t
-                  ? 'bg-neutral-800 text-neutral-100'
-                  : 'text-neutral-500 hover:text-neutral-300'
-              }`}
-              onClick={() => setTab(t)}
-            >
-              {t === 'agents' ? 'Agents' : 'Contract'}
-            </button>
-          ))}
-        </div>
-
-        <div className="ml-auto flex items-center gap-2">
-          <button
-            className="rounded bg-neutral-800 px-2 py-1 text-xs hover:bg-neutral-700 disabled:opacity-40"
-            onClick={() => onRelaunch(ticket.id)}
-            disabled={launchDisabled}
-            title={anyRunning ? 'Agents still running' : 'Spawn agents again'}
-          >
-            {launching
-              ? 'Launching…'
-              : ticket.agents.length === 0
-                ? 'Launch'
-                : 'Relaunch'}
-          </button>
-          <button
-            className="rounded bg-neutral-800 px-2 py-1 text-xs hover:bg-neutral-700 disabled:opacity-40"
-            onClick={() => onMarkDone(ticket.id)}
-            disabled={ticketState === 'done'}
-          >
-            Mark done
-          </button>
-        </div>
+        <span className="pk-detail__meta">
+          <GitPullRequest size={13} /> {mrOpen} open
+        </span>
+        <Button
+          variant="secondary"
+          size="sm"
+          icon={<RotateCw size={13} />}
+          disabled={launchDisabled}
+          onClick={() => onRelaunch(ticket.id)}
+        >
+          {launching ? 'Launching…' : ticket.agents.length === 0 ? 'Launch' : 'Relaunch'}
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          icon={<CheckCircle2 size={13} />}
+          disabled={ticketState === 'done'}
+          onClick={() => onMarkDone(ticket.id)}
+        >
+          Mark done
+        </Button>
       </div>
 
-      {tab === 'contract' ? (
-        <div className="min-h-0 flex-1 overflow-auto p-2">
-          {contractContent.trim() ? (
-            <pre className="m-0 whitespace-pre-wrap break-words text-[12px] leading-relaxed text-neutral-300">
-              {contractContent}
-            </pre>
-          ) : (
-            <div className="flex h-full items-center justify-center text-sm text-neutral-600">
-              No contract yet. The producer agent writes{' '}
-              <code className="mx-1 text-neutral-400">contract.md</code> early; it
-              streams here live.
+      <div className="pk-detail__tabs">
+        <Tabs
+          value={tab}
+          onChange={(v) => setTab(v as 'agents' | 'contract')}
+          tabs={[
+            {
+              value: 'agents',
+              label: 'Agents',
+              icon: <SquareTerminal size={14} />,
+              count: ticket.agents.length
+            },
+            { value: 'contract', label: 'Contract', icon: <FileText size={14} /> }
+          ]}
+        />
+      </div>
+
+      <div className="pk-detail__body">
+        {tab === 'contract' ? (
+          contractContent.trim() ? (
+            <div className="pk-contract">
+              <div className="pk-contract__bar">
+                <FileText size={14} style={{ color: 'var(--text-muted)' }} />
+                <span className="pk-contract__path">
+                  .orchestrator/tickets/{ticket.id.slice(0, 8)}/contract.md
+                </span>
+                <span className="pk-contract__watch">
+                  <span className="pk-livedot" /> watching
+                </span>
+              </div>
+              <pre className="pk-contract__body">{contractContent}</pre>
             </div>
-          )}
-        </div>
-      ) : ticket.agents.length === 0 ? (
-        <div className="flex flex-1 items-center justify-center text-sm text-neutral-600">
-          No agents yet — launch this ticket to spawn one agent per target repo.
-        </div>
-      ) : (
-        <div
-          className="grid min-h-0 flex-1 gap-2 p-2"
-          style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
-        >
-          {ticket.agents.map((agent) => (
-            <AgentPane
-              key={agent.id}
-              agent={agent}
-              state={agentStates[agent.id] ?? agent.state}
-              mrUrl={agentMrUrls[agent.id] ?? agent.mrUrl}
-              errorText={agentErrors[agent.id]}
-              onKill={onKill}
-              onViewDiff={onViewDiff}
-              onCreateMr={onCreateMr}
-              onOpenLink={onOpenLink}
+          ) : (
+            <EmptyState
+              icon={<FileText size={20} />}
+              title="No contract yet"
+              desc="The contract producer writes contract.md early; consumers read it before implementing. It streams here live."
             />
-          ))}
-        </div>
-      )}
+          )
+        ) : ticket.agents.length === 0 ? (
+          <EmptyState
+            icon={<SquareTerminal size={20} />}
+            title="No agents yet"
+            desc="Launch this ticket to spawn one agent per target repo."
+          />
+        ) : (
+          <div
+            className="pk-panes"
+            style={{
+              gridTemplateColumns:
+                ticket.agents.length === 1
+                  ? '1fr'
+                  : 'repeat(auto-fill, minmax(420px, 1fr))'
+            }}
+          >
+            {ticket.agents.map((agent) => (
+              <AgentPane
+                key={agent.id}
+                agent={agent}
+                state={agentStates[agent.id] ?? agent.state}
+                mrUrl={agentMrUrls[agent.id] ?? agent.mrUrl}
+                errorText={agentErrors[agent.id]}
+                onKill={onKill}
+                onViewDiff={onViewDiff}
+                onCreateMr={onCreateMr}
+                onOpenLink={onOpenLink}
+              />
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   )
 }

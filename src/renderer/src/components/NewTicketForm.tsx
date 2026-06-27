@@ -1,11 +1,12 @@
 import { useState } from 'react'
+import { GitBranch, Play, TriangleAlert } from 'lucide-react'
 import type { OrderingMode, WorkspaceWithRepos } from '@shared/types'
+import { Badge, Button, Checkbox, Dialog, Input, Select, Textarea } from './ui'
 
 interface NewTicketFormProps {
   workspace: WorkspaceWithRepos
   defaultOrderingMode: OrderingMode
   onClose: () => void
-  /** Called after create (and optional launch). */
   onDone: (ticketId: string, launched: boolean) => void | Promise<void>
 }
 
@@ -18,7 +19,7 @@ export function NewTicketForm({
   const [title, setTitle] = useState('')
   const [spec, setSpec] = useState('')
   const [targetRepoIds, setTargetRepoIds] = useState<string[]>(
-    workspace.repos.map((r) => r.id) // default: target all repos
+    workspace.repos.map((r) => r.id)
   )
   const [orderingMode, setOrderingMode] = useState<OrderingMode>(defaultOrderingMode)
   const [error, setError] = useState('')
@@ -30,10 +31,14 @@ export function NewTicketForm({
     )
   }
 
+  const producerTargeted = workspace.repos.some(
+    (r) => targetRepoIds.includes(r.id) && r.isContractProducer
+  )
+  const canSubmit = title.trim().length > 0 && targetRepoIds.length > 0
+
   async function submit(launch: boolean): Promise<void> {
     setError('')
-    if (!title.trim()) return setError('Title is required')
-    if (targetRepoIds.length === 0) return setError('Select at least one repo')
+    if (!canSubmit) return setError('Title and at least one repo are required')
     setBusy(true)
     try {
       const ticket = await window.api.createTicket({
@@ -51,113 +56,92 @@ export function NewTicketForm({
     }
   }
 
-  const inputCls =
-    'w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-sm outline-none focus:border-neutral-500'
+  const footer = (
+    <>
+      <span className="pk-dlg__hint">
+        {targetRepoIds.length} repo{targetRepoIds.length === 1 ? '' : 's'} →{' '}
+        {targetRepoIds.length} agent{targetRepoIds.length === 1 ? '' : 's'}
+      </span>
+      <Button variant="ghost" onClick={onClose}>
+        Cancel
+      </Button>
+      <Button variant="secondary" disabled={busy || !canSubmit} onClick={() => submit(false)}>
+        Save draft
+      </Button>
+      <Button
+        variant="primary"
+        icon={<Play size={13} />}
+        disabled={busy || !canSubmit}
+        onClick={() => submit(true)}
+      >
+        {busy ? 'Launching…' : 'Launch'}
+      </Button>
+    </>
+  )
 
   return (
-    <div className="fixed inset-0 z-10 flex items-center justify-center bg-black/60 p-6">
-      <div className="flex max-h-full w-[560px] flex-col gap-3 overflow-y-auto rounded-lg border border-neutral-800 bg-neutral-950 p-5">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold">New ticket · {workspace.name}</h2>
-          <button
-            className="text-neutral-500 hover:text-neutral-300"
-            onClick={onClose}
-          >
-            ✕
-          </button>
-        </div>
+    <Dialog title="New ticket" onClose={onClose} width={580} footer={footer}>
+      <div className="pk-form">
+        <Input
+          label="Title"
+          placeholder="Add login page"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          autoFocus
+        />
+        <Textarea
+          label="Spec"
+          rows={4}
+          placeholder="Describe what every agent should build. The producer defines the contract; consumers read it."
+          value={spec}
+          onChange={(e) => setSpec(e.target.value)}
+        />
 
-        <label className="flex flex-col gap-1">
-          <span className="text-xs font-medium text-neutral-400">Title</span>
-          <input
-            className={inputCls}
-            placeholder="e.g. Add login page"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            autoFocus
-          />
-        </label>
-
-        <label className="flex flex-col gap-1">
-          <span className="text-xs font-medium text-neutral-400">Spec</span>
-          <textarea
-            className={`${inputCls} h-32 resize-none`}
-            placeholder="What should the agents build? This is the prompt each agent receives."
-            value={spec}
-            onChange={(e) => setSpec(e.target.value)}
-          />
-        </label>
-
-        <div className="flex flex-col gap-1">
-          <span className="text-xs font-medium text-neutral-400">Target repos</span>
+        <div className="pk-form__field">
+          <span className="pk-form__label">Target repos</span>
           {workspace.repos.length === 0 ? (
-            <div className="text-xs text-neutral-600">
-              This workspace has no repos. Add some from the sidebar first.
-            </div>
+            <span className="pk-form__hint">
+              This workspace has no repos — add some from the sidebar first.
+            </span>
           ) : (
-            <div className="grid grid-cols-2 gap-1">
-              {workspace.repos.map((repo) => (
-                <label
-                  key={repo.id}
-                  className="flex items-center gap-2 rounded border border-neutral-800 px-2 py-1 text-sm"
-                >
-                  <input
-                    type="checkbox"
-                    checked={targetRepoIds.includes(repo.id)}
-                    onChange={() => toggleRepo(repo.id)}
-                  />
-                  <span className="truncate">{repo.name}</span>
-                  {repo.isContractProducer && (
-                    <span className="ml-auto rounded bg-amber-900/50 px-1 text-[9px] text-amber-300">
-                      producer
-                    </span>
-                  )}
-                </label>
-              ))}
+            <div className="pk-repogrid">
+              {workspace.repos.map((r) => {
+                const on = targetRepoIds.includes(r.id)
+                return (
+                  <label key={r.id} className={`pk-repopick${on ? ' pk-repopick--on' : ''}`}>
+                    <Checkbox checked={on} onChange={() => toggleRepo(r.id)} />
+                    <GitBranch size={13} style={{ color: 'var(--text-muted)' }} />
+                    <span className="pk-repopick__name">{r.name}</span>
+                    {r.isContractProducer && <Badge variant="violet">producer</Badge>}
+                    <span className="pk-repopick__host">{r.gitHost === 'github' ? 'GH' : 'GL'}</span>
+                  </label>
+                )
+              })}
             </div>
           )}
         </div>
 
-        <div className="flex flex-col gap-1">
-          <span className="text-xs font-medium text-neutral-400">Ordering</span>
-          <div className="flex gap-4 text-sm">
-            {(['concurrent', 'producer_first'] as OrderingMode[]).map((m) => (
-              <label key={m} className="flex items-center gap-2">
-                <input
-                  type="radio"
-                  name="ordering"
-                  checked={orderingMode === m}
-                  onChange={() => setOrderingMode(m)}
-                />
-                {m === 'concurrent' ? 'Concurrent' : 'Producer first'}
-              </label>
-            ))}
+        <div className="pk-form__field">
+          <span className="pk-form__label">Ordering</span>
+          <Select
+            value={orderingMode}
+            onChange={(e) => setOrderingMode(e.target.value as OrderingMode)}
+            options={[
+              { value: 'producer_first', label: 'Producer first — contract, then consumers' },
+              { value: 'concurrent', label: 'Concurrent — all at once' }
+            ]}
+          />
+        </div>
+
+        {orderingMode === 'producer_first' && !producerTargeted && (
+          <div className="pk-warn">
+            <TriangleAlert size={13} /> No contract producer in the selected repos — agents
+            will run concurrently.
           </div>
-          <span className="text-[11px] text-neutral-600">
-            Producer-first spawns the contract producer, then the rest once
-            <code className="mx-1 text-neutral-400">contract.md</code> is written.
-          </span>
-        </div>
+        )}
 
-        {error && <div className="text-xs text-red-400">{error}</div>}
-
-        <div className="mt-1 flex justify-end gap-2">
-          <button
-            className="rounded bg-neutral-800 px-3 py-1.5 text-xs hover:bg-neutral-700 disabled:opacity-40"
-            onClick={() => submit(false)}
-            disabled={busy || !title.trim() || targetRepoIds.length === 0}
-          >
-            Save draft
-          </button>
-          <button
-            className="rounded bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-40"
-            onClick={() => submit(true)}
-            disabled={busy || !title.trim() || targetRepoIds.length === 0}
-          >
-            {busy ? 'Launching…' : 'Launch'}
-          </button>
-        </div>
+        {error && <div className="pk-error">{error}</div>}
       </div>
-    </div>
+    </Dialog>
   )
 }
