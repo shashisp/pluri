@@ -1,159 +1,128 @@
-import { useEffect, useMemo, useState } from 'react'
-import type { AgentState, AgentStateMsg } from '@shared/types'
-import { TerminalPane } from './components/TerminalPane'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import type { WorkspaceWithRepos } from '@shared/types'
+import { Sidebar } from './components/Sidebar'
+import { AgentSandbox } from './components/AgentSandbox'
 
-// Phase 1 defaults: a single hardcoded-ish target and a safe, read-only prompt.
-const DEFAULT_CWD = '/Users/shashikumarp/sideprojects/pluri'
-const DEFAULT_PROMPT =
-  'Read the files in this repository and give me a concise summary of what it does, its tech stack, and its entry points. Do not modify anything.'
-const DEFAULT_SYSTEM_PROMPT =
-  'You are operating ONLY inside the current working directory. Do not touch anything outside it.'
-
-const STATE_META: Record<AgentState, { dot: string; label: string }> = {
-  idle: { dot: 'bg-neutral-500', label: 'idle' },
-  working: { dot: 'bg-yellow-400 animate-pulse', label: 'working' },
-  awaiting_mr: { dot: 'bg-blue-400', label: 'awaiting MR' },
-  mr_open: { dot: 'bg-green-500', label: 'MR open' },
-  done: { dot: 'bg-green-500', label: 'done' },
-  killed: { dot: 'bg-red-500', label: 'killed' },
-  error: { dot: 'bg-red-500', label: 'error' }
-}
-
-function StatusDot({ state }: { state: AgentState }): JSX.Element {
-  const meta = STATE_META[state]
-  return (
-    <span className="inline-flex items-center gap-2 text-xs text-neutral-300">
-      <span className={`h-2.5 w-2.5 rounded-full ${meta.dot}`} />
-      {meta.label}
-    </span>
-  )
-}
+type View = 'board' | 'sandbox'
 
 export default function App(): JSX.Element {
-  const [cwd, setCwd] = useState(DEFAULT_CWD)
-  const [prompt, setPrompt] = useState(DEFAULT_PROMPT)
-  const [agentId, setAgentId] = useState<string | null>(null)
-  const [state, setState] = useState<AgentState>('idle')
-  const [detail, setDetail] = useState<string>('')
+  const [workspaces, setWorkspaces] = useState<WorkspaceWithRepos[]>([])
+  const [selectedWsId, setSelectedWsId] = useState<string | null>(null)
+  const [view, setView] = useState<View>('board')
 
-  const running = state === 'working'
-
-  useEffect(() => {
-    const unsubscribe = window.api.onAgentState((msg: AgentStateMsg) => {
-      // Only track the agent we spawned from this pane.
-      setAgentId((current) => {
-        if (msg.agentId !== current) return current
-        setState(msg.state)
-        if (msg.error) setDetail(msg.error)
-        else if (msg.result) setDetail('finished')
-        return current
-      })
-    })
-    return unsubscribe
+  const refresh = useCallback(async (): Promise<void> => {
+    setWorkspaces(await window.api.listWorkspaces())
   }, [])
 
-  async function handleSpawn(): Promise<void> {
-    setDetail('')
-    setState('working')
-    try {
-      const { agentId: id } = await window.api.spawnAgent({
-        cwd,
-        prompt,
-        systemPrompt: DEFAULT_SYSTEM_PROMPT,
-        allowedTools: 'Read'
-      })
-      setAgentId(id)
-    } catch (err) {
-      setState('error')
-      setDetail(err instanceof Error ? err.message : String(err))
-    }
-  }
+  useEffect(() => {
+    void refresh()
+  }, [refresh])
 
-  async function handleKill(): Promise<void> {
-    if (agentId) await window.api.killAgent(agentId)
-  }
-
-  const header = useMemo(
-    () => (
-      <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-2">
-        <div className="flex items-center gap-3">
-          <span className="text-sm font-semibold tracking-tight">Pluri</span>
-          <span className="text-xs text-neutral-500">
-            Phase 1 — single agent spawn &amp; stream
-          </span>
-        </div>
-        <StatusDot state={state} />
-      </div>
-    ),
-    [state]
+  const selectedWs = useMemo(
+    () => workspaces.find((w) => w.id === selectedWsId) ?? null,
+    [workspaces, selectedWsId]
   )
 
   return (
     <div className="flex h-full flex-col bg-[#0a0a0a] text-neutral-200">
-      {header}
-
-      <div className="grid grid-cols-[360px_1fr] flex-1 overflow-hidden">
-        {/* Controls */}
-        <div className="flex flex-col gap-3 overflow-y-auto border-r border-neutral-800 p-4">
-          <label className="flex flex-col gap-1">
-            <span className="text-xs font-medium text-neutral-400">Repo path (cwd)</span>
-            <input
-              className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs outline-none focus:border-neutral-500"
-              value={cwd}
-              onChange={(e) => setCwd(e.target.value)}
-              spellCheck={false}
-            />
-          </label>
-
-          <label className="flex flex-col gap-1">
-            <span className="text-xs font-medium text-neutral-400">Prompt</span>
-            <textarea
-              className="h-40 resize-none rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs outline-none focus:border-neutral-500"
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              spellCheck={false}
-            />
-          </label>
-
-          <div className="flex gap-2">
+      {/* Top bar */}
+      <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-2">
+        <div className="flex items-center gap-3">
+          <span className="text-sm font-semibold tracking-tight">Pluri</span>
+          <span className="text-xs text-neutral-500">
+            Phase 2 — workspaces &amp; repos
+          </span>
+        </div>
+        <div className="flex gap-1 text-xs">
+          {(['board', 'sandbox'] as View[]).map((v) => (
             <button
-              className="flex-1 rounded bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
-              onClick={handleSpawn}
-              disabled={running || !cwd.trim() || !prompt.trim()}
+              key={v}
+              className={`rounded px-2 py-1 ${
+                view === v
+                  ? 'bg-neutral-800 text-neutral-100'
+                  : 'text-neutral-500 hover:text-neutral-300'
+              }`}
+              onClick={() => setView(v)}
             >
-              {running ? 'Running…' : 'Spawn agent'}
+              {v === 'board' ? 'Board' : 'Agent sandbox'}
             </button>
-            <button
-              className="rounded bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-40"
-              onClick={handleKill}
-              disabled={!running}
-            >
-              Kill
-            </button>
-          </div>
+          ))}
+        </div>
+      </div>
 
-          <div className="mt-1 text-xs text-neutral-500">
-            <div>
-              agent: <span className="text-neutral-300">{agentId ?? '—'}</span>
+      {/* Body */}
+      <div className="grid min-h-0 flex-1 grid-cols-[260px_1fr]">
+        <Sidebar
+          workspaces={workspaces}
+          selectedWsId={selectedWsId}
+          onSelect={setSelectedWsId}
+          onChanged={refresh}
+        />
+
+        <div className="min-w-0 overflow-hidden">
+          {view === 'sandbox' ? (
+            <AgentSandbox />
+          ) : (
+            <BoardPlaceholder workspace={selectedWs} />
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function BoardPlaceholder({
+  workspace
+}: {
+  workspace: WorkspaceWithRepos | null
+}): JSX.Element {
+  if (!workspace) {
+    return (
+      <div className="flex h-full items-center justify-center text-sm text-neutral-600">
+        Select or create a workspace to begin.
+      </div>
+    )
+  }
+  return (
+    <div className="h-full overflow-y-auto p-6">
+      <h1 className="text-lg font-semibold">{workspace.name}</h1>
+      <p className="mt-1 text-xs text-neutral-500">
+        {workspace.repos.length} repo{workspace.repos.length === 1 ? '' : 's'}
+      </p>
+
+      <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-3">
+        {workspace.repos.map((repo) => (
+          <div
+            key={repo.id}
+            className="rounded-lg border border-neutral-800 bg-neutral-900/40 p-3"
+          >
+            <div className="flex items-center gap-2">
+              <span className="font-medium">{repo.name}</span>
+              {repo.isContractProducer && (
+                <span className="rounded bg-amber-900/50 px-1 text-[9px] text-amber-300">
+                  producer
+                </span>
+              )}
             </div>
-            {detail && (
-              <div className="mt-1 whitespace-pre-wrap break-words text-neutral-400">
-                {detail}
-              </div>
-            )}
+            <div className="mt-1 truncate text-xs text-neutral-500" title={repo.path}>
+              {repo.path}
+            </div>
+            <div className="mt-2 flex gap-2 text-[10px] text-neutral-600">
+              <span>{repo.gitHost}</span>
+              <span>·</span>
+              <span>{repo.defaultBranch}</span>
+            </div>
           </div>
+        ))}
+        {workspace.repos.length === 0 && (
+          <div className="text-sm text-neutral-600">
+            No repos yet — add one from the sidebar.
+          </div>
+        )}
+      </div>
 
-          <p className="mt-auto text-[11px] leading-relaxed text-neutral-600">
-            Read-only prompt (allowedTools = Read). Spawns{' '}
-            <code className="text-neutral-400">claude -p … --output-format stream-json</code>{' '}
-            in the repo path and streams events into the pane.
-          </p>
-        </div>
-
-        {/* Terminal */}
-        <div className="min-w-0">
-          <TerminalPane agentId={agentId} />
-        </div>
+      <div className="mt-8 rounded-lg border border-dashed border-neutral-800 p-6 text-center text-sm text-neutral-600">
+        Ticket board arrives in Phase 3.
       </div>
     </div>
   )

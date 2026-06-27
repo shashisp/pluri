@@ -1,8 +1,10 @@
-import { app, BrowserWindow, session, shell } from 'electron'
+import { app, BrowserWindow, dialog, session, shell } from 'electron'
 import { join } from 'node:path'
 import { registerIpc } from './ipc'
+import { Db } from './services/db'
 
 let mainWindow: BrowserWindow | null = null
+let db: Db | null = null
 
 const isDev = (): boolean => Boolean(process.env['ELECTRON_RENDERER_URL'])
 
@@ -73,16 +75,39 @@ function createWindow(): void {
 
 app.whenReady().then(() => {
   installCsp()
-  const manager = registerIpc(() => mainWindow)
+
+  // The DB is a native module (better-sqlite3) rebuilt for Electron's ABI; an
+  // ABI/stale-binary/unwritable-path failure here would otherwise leave a blank,
+  // windowless app. Surface it and quit cleanly instead.
+  try {
+    db = new Db(join(app.getPath('userData'), 'pluri.db'))
+  } catch (err) {
+    dialog.showErrorBox(
+      'Pluri failed to start',
+      'Could not open the database. The native module may need rebuilding ' +
+        '(run `npm run rebuild`).\n\n' +
+        String(err)
+    )
+    app.quit()
+    return
+  }
+
+  const manager = registerIpc(() => mainWindow, db)
 
   // Make sure no orphaned claude processes survive the app.
-  app.on('before-quit', () => manager.killAll())
+  app.on('before-quit', () => {
+    manager.killAll()
+    db?.close()
+  })
 
   createWindow()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
+}).catch((err) => {
+  dialog.showErrorBox('Pluri failed to start', String(err))
+  app.quit()
 })
 
 app.on('window-all-closed', () => {

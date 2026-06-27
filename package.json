@@ -13,11 +13,19 @@
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "test:parser": "node --experimental-strip-types scripts/test-parser.ts",
-    "test:e2e": "esbuild scripts/e2e-agent.ts --bundle --platform=node --format=esm --external:electron --alias:@shared=./src/shared --outfile=out/e2e-agent.mjs && node out/e2e-agent.mjs"
+    "test:e2e": "esbuild scripts/e2e-agent.ts --bundle --platform=node --format=esm --external:electron --alias:@shared=./src/shared --outfile=out/e2e-agent.mjs && node out/e2e-agent.mjs",
+    "test:db": "esbuild scripts/test-db.ts --bundle --platform=node --format=cjs --external:better-sqlite3 --alias:@shared=./src/shared --outfile=out/test-db.cjs && ELECTRON_RUN_AS_NODE=1 electron out/test-db.cjs",
+    "rebuild": "electron-rebuild -f -w better-sqlite3",
+    "postinstall": "electron-rebuild -f -w better-sqlite3"
   },
-  "dependencies": {},
+  "dependencies": {
+    "better-sqlite3": "^12.11.1",
+    "simple-git": "^3.36.0"
+  },
   "devDependencies": {
+    "@electron/rebuild": "^4.0.4",
     "@tailwindcss/vite": "^4.1.0",
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.10.0",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",

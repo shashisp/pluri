@@ -5,7 +5,8 @@ multiple *independent* git repositories grouped into **workspaces**, with work
 organized by **ticket** (a ticket spans a chosen subset of a workspace's repos).
 Isolation is by repo folder (`cwd`) — no git worktrees, no cross-repo merge logic.
 
-> Status: **Phase 1** — single agent spawn & live stream. See [Build phases](#build-phases).
+> Status: **Phase 2** — SQLite data model + workspaces/repos, persisted across
+> restarts. See [Build phases](#build-phases).
 
 ## Prerequisites
 
@@ -14,6 +15,10 @@ Isolation is by repo folder (`cwd`) — no git worktrees, no cross-repo merge lo
   Claude Code's existing auth (Pro/Max or API key). **Pluri never stores or
   transmits API keys.**
 - For later phases (Git/MR): **`gh`** (GitHub) and/or **`glab`** (GitLab) on `PATH`.
+
+> **Native module note:** `better-sqlite3` is compiled against Electron's ABI.
+> `npm install` runs `electron-rebuild` automatically (postinstall); if you ever
+> see a `NODE_MODULE_VERSION` error, run `npm run rebuild`.
 
 ## Run
 
@@ -30,6 +35,8 @@ npm run typecheck    # tsc --noEmit for node + web targets
 npm run test:parser  # unit-test the stream-json line buffer (no deps)
 npm run test:e2e     # drive the real AgentManager against a live `claude`
                      # (spawn->stream->done, and spawn->kill->killed)
+npm run test:db      # SQLite persistence test (runs under Electron's ABI)
+npm run rebuild      # rebuild better-sqlite3 for Electron (if ABI mismatch)
 ```
 
 > `test:e2e` spawns real Claude Code processes, so it consumes a little usage
@@ -66,20 +73,27 @@ src/
     types.ts
     streamParser.ts  createLineBuffer / parseEventLine / terminal detection
   main/              Electron main process (all privileged work)
-    index.ts         window + lifecycle + kill-all-on-quit
-    ipc.ts           ipcMain handlers, forwards manager events to renderer
+    index.ts         window + lifecycle + CSP + DB init + kill-all-on-quit
+    ipc.ts           ipcMain handlers (agents + workspaces/repos + dialog)
     services/
       AgentManager.ts  spawn / parse / state / kill  (Electron-free, testable)
+      db.ts            SQLite persistence (Electron-free, path injected)
   preload/
     index.ts         typed contextBridge -> window.api
     index.d.ts       window.api typings for the renderer
   renderer/          Vite + React + Tailwind UI
     src/
-      App.tsx
-      components/TerminalPane.tsx   one live xterm.js pane
+      App.tsx                       three-pane shell (sidebar + main)
+      components/
+        Sidebar.tsx                 workspaces/repos tree + add forms
+        AgentSandbox.tsx            Phase 1 single-agent harness (dev view)
+        TerminalPane.tsx            one live xterm.js pane
+        StatusDot.tsx               agent state indicator
       lib/format.ts                 stream-json event -> colored terminal text
 scripts/
   test-parser.ts     line-buffer unit test
+  test-db.ts         SQLite persistence test (Electron ABI)
+  e2e-agent.ts       real AgentManager vs live claude
 ```
 
 Security guardrails: `contextIsolation: true`, `nodeIntegration: false`,
@@ -90,8 +104,8 @@ links to the OS browser. All process/git/file work lives in main behind IPC.
 
 | Phase | Scope | Status |
 |------|-------|--------|
-| **1** | Electron+Vite+React skeleton; spawn one headless agent in a repo, parse stream-json, render live xterm output, Kill button. | ✅ this build |
-| 2 | SQLite data model; add workspaces/repos; persistence across restarts. | ⬜ |
+| **1** | Electron+Vite+React skeleton; spawn one headless agent in a repo, parse stream-json, render live xterm output, Kill button. | ✅ |
+| **2** | SQLite data model; add workspaces/repos; persistence across restarts. | ✅ this build |
 | 3 | Tickets + multi-repo fan-out; N panes; status dots. | ⬜ |
 | 4 | Auto-branch on spawn; push + open MR/PR via `gh`/`glab`; ticket roll-up. | ⬜ |
 | 5 | Shared `.orchestrator/tickets/<id>/` contract folder; `producer_first` ordering; live Contract tab. | ⬜ |

@@ -93,3 +93,68 @@ export interface AgentStateMsg {
   /** Exit code when the process closed. */
   exitCode?: number | null
 }
+
+// ---- Persisted data model (Phase 2+) ---------------------------------------
+
+export type GitHost = 'github' | 'gitlab'
+export type TicketState = 'draft' | 'running' | 'awaiting_review' | 'done'
+
+export interface Workspace {
+  id: string
+  name: string
+  createdAt: number
+}
+
+export interface Repo {
+  id: string
+  workspaceId: string
+  name: string // "backend", "frontend", "ios"
+  path: string // absolute path on disk
+  gitHost: GitHost
+  defaultBranch: string // e.g. "main"
+  isContractProducer: boolean
+}
+
+/** A workspace with its repos eagerly loaded — what the sidebar renders. */
+export interface WorkspaceWithRepos extends Workspace {
+  repos: Repo[]
+}
+
+export interface Ticket {
+  id: string
+  workspaceId: string
+  title: string
+  spec: string
+  /** Repo.id values this ticket targets. */
+  targetRepoIds: string[]
+  state: TicketState
+  createdAt: number
+}
+
+/** Persisted agent record (distinct from the live process in AgentManager). */
+export interface AgentRecord {
+  id: string
+  ticketId: string
+  repoId: string
+  branch: string | null
+  pid: number | null
+  state: AgentState
+  mrUrl: string | null
+  startedAt: number | null
+  endedAt: number | null
+}
+
+// ---- Data-model IPC payloads -----------------------------------------------
+
+export interface CreateWorkspaceInput {
+  name: string
+}
+
+export interface AddRepoInput {
+  workspaceId: string
+  name: string
+  path: string
+  gitHost: GitHost
+  defaultBranch: string
+  isContractProducer: boolean
+}
