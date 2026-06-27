@@ -1,0 +1,18 @@
+@import 'tailwindcss';
+@import '@xterm/xterm/css/xterm.css';
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background-color: #0a0a0a;
+  color: #e5e5e5;
+  font-family:
+    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica,
+    Arial, sans-serif;
+  overflow: hidden;
+}
