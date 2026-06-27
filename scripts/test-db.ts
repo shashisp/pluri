@@ -75,6 +75,92 @@ function assert(cond: boolean, msg: string): void {
     frontend?.gitHost === 'gitlab' && frontend?.defaultBranch === 'develop',
     'repo gitHost/defaultBranch persisted'
   )
+
+  // --- Tickets + agents (Phase 3) -------------------------------------------
+  const wsId = all[0]!.id
+  const backendId = backend!.id
+  const frontendId = frontend!.id
+
+  const ticket = db.createTicket({
+    workspaceId: wsId,
+    title: 'Add login page',
+    spec: 'Implement login across repos.',
+    targetRepoIds: [backendId, frontendId],
+    orderingMode: 'producer_first'
+  })
+  assert(ticket.state === 'draft', 'new ticket starts as draft')
+  assert(ticket.orderingMode === 'producer_first', 'orderingMode stored')
+
+  const got = db.getTicket(ticket.id)
+  assert(got?.targetRepoIds.length === 2, 'targetRepoIds JSON round-trips')
+  assert(
+    JSON.stringify(got?.targetRepoIds) === JSON.stringify([backendId, frontendId]),
+    'targetRepoIds preserve order/content'
+  )
+
+  // Simulate a launch: two agents, then drive them to terminal states.
+  db.insertAgent({
+    id: 'agent-be',
+    ticketId: ticket.id,
+    repoId: backendId,
+    branch: 'ticket-x-add-login',
+    pid: 1234,
+    state: 'working',
+    mrUrl: null,
+    startedAt: Date.now(),
+    endedAt: null
+  })
+  db.insertAgent({
+    id: 'agent-fe',
+    ticketId: ticket.id,
+    repoId: frontendId,
+    branch: 'ticket-x-add-login',
+    pid: 1235,
+    state: 'working',
+    mrUrl: null,
+    startedAt: Date.now(),
+    endedAt: null
+  })
+
+  let agents = db.listAgentsByTicket(ticket.id)
+  assert(agents.length === 2, 'two agents listed for ticket')
+  assert(
+    agents.every((a) => a.repoName === 'backend' || a.repoName === 'frontend'),
+    'agent rows join repo name'
+  )
+  assert(agents[0]?.repoPath !== undefined, 'agent join includes repo path')
+
+  // Rollup logic mirror: not all terminal yet.
+  db.setAgentState('agent-be', 'done', { endedAt: Date.now() })
+  agents = db.listAgentsByTicket(ticket.id)
+  const allTerminal1 = agents.every((a) =>
+    ['done', 'error', 'killed', 'mr_open'].includes(a.state)
+  )
+  assert(!allTerminal1, 'ticket not all-terminal while one agent works')
+
+  db.setAgentState('agent-fe', 'error', { endedAt: Date.now() })
+  agents = db.listAgentsByTicket(ticket.id)
+  const allTerminal2 = agents.every((a) =>
+    ['done', 'error', 'killed', 'mr_open'].includes(a.state)
+  )
+  assert(allTerminal2, 'ticket all-terminal once both agents finish')
+
+  db.setTicketState(ticket.id, 'awaiting_review')
+  assert(
+    db.getTicket(ticket.id)?.state === 'awaiting_review',
+    'ticket state transitions to awaiting_review'
+  )
+
+  // Relaunch replaces prior agents.
+  db.deleteAgentsForTicket(ticket.id)
+  assert(
+    db.listAgentsByTicket(ticket.id).length === 0,
+    'deleteAgentsForTicket clears agents for relaunch'
+  )
+
+  const withAgents = db.listTicketsWithAgents(wsId)
+  assert(withAgents.length === 1, 'listTicketsWithAgents returns the ticket')
+
   db.close()
 }
 

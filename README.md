@@ -5,8 +5,8 @@ multiple *independent* git repositories grouped into **workspaces**, with work
 organized by **ticket** (a ticket spans a chosen subset of a workspace's repos).
 Isolation is by repo folder (`cwd`) — no git worktrees, no cross-repo merge logic.
 
-> Status: **Phase 2** — SQLite data model + workspaces/repos, persisted across
-> restarts. See [Build phases](#build-phases).
+> Status: **Phase 3** — tickets + multi-repo fan-out (one agent per targeted
+> repo, N live panes, status dots). See [Build phases](#build-phases).
 
 ## Prerequisites
 
@@ -35,7 +35,9 @@ npm run typecheck    # tsc --noEmit for node + web targets
 npm run test:parser  # unit-test the stream-json line buffer (no deps)
 npm run test:e2e     # drive the real AgentManager against a live `claude`
                      # (spawn->stream->done, and spawn->kill->killed)
-npm run test:db      # SQLite persistence test (runs under Electron's ABI)
+npm run test:db      # SQLite persistence + ticket/agent CRUD (under Electron ABI)
+npm run test:fanout  # real fan-out: launch a ticket across 2 temp repos,
+                     # 2 agents spawn, both finish, ticket rolls up
 npm run rebuild      # rebuild better-sqlite3 for Electron (if ABI mismatch)
 ```
 
@@ -76,23 +78,30 @@ src/
     index.ts         window + lifecycle + CSP + DB init + kill-all-on-quit
     ipc.ts           ipcMain handlers (agents + workspaces/repos + dialog)
     services/
-      AgentManager.ts  spawn / parse / state / kill  (Electron-free, testable)
+      AgentManager.ts  spawn / parse / state / kill + log ring  (Electron-free)
       db.ts            SQLite persistence (Electron-free, path injected)
+      TicketLauncher.ts fan-out: agent per repo, persist, roll ticket up
+      prompts.ts        slug / branch name / per-repo scope prompt
   preload/
     index.ts         typed contextBridge -> window.api
     index.d.ts       window.api typings for the renderer
   renderer/          Vite + React + Tailwind UI
     src/
-      App.tsx                       three-pane shell (sidebar + main)
+      App.tsx                       shell + board/detail/sandbox + live overlays
       components/
         Sidebar.tsx                 workspaces/repos tree + add forms
+        TicketBoard.tsx             columns by state + cards + status dots
+        NewTicketForm.tsx           title/spec/repo checkboxes/ordering
+        TicketDetail.tsx            N-pane grid for a ticket's agents
+        AgentPane.tsx               one agent: terminal + footer (branch/state/kill)
         AgentSandbox.tsx            Phase 1 single-agent harness (dev view)
-        TerminalPane.tsx            one live xterm.js pane
+        TerminalPane.tsx            live xterm.js pane w/ backfill + seq-dedup
         StatusDot.tsx               agent state indicator
       lib/format.ts                 stream-json event -> colored terminal text
 scripts/
   test-parser.ts     line-buffer unit test
-  test-db.ts         SQLite persistence test (Electron ABI)
+  test-db.ts         SQLite + ticket/agent CRUD test (Electron ABI)
+  test-fanout.ts     real multi-repo fan-out e2e
   e2e-agent.ts       real AgentManager vs live claude
 ```
 
@@ -105,8 +114,8 @@ links to the OS browser. All process/git/file work lives in main behind IPC.
 | Phase | Scope | Status |
 |------|-------|--------|
 | **1** | Electron+Vite+React skeleton; spawn one headless agent in a repo, parse stream-json, render live xterm output, Kill button. | ✅ |
-| **2** | SQLite data model; add workspaces/repos; persistence across restarts. | ✅ this build |
-| 3 | Tickets + multi-repo fan-out; N panes; status dots. | ⬜ |
+| **2** | SQLite data model; add workspaces/repos; persistence across restarts. | ✅ |
+| **3** | Tickets + multi-repo fan-out; N panes; status dots. | ✅ this build |
 | 4 | Auto-branch on spawn; push + open MR/PR via `gh`/`glab`; ticket roll-up. | ⬜ |
 | 5 | Shared `.orchestrator/tickets/<id>/` contract folder; `producer_first` ordering; live Contract tab. | ⬜ |
 | 6 | View Diff, board grouping, restart restore, multi-ticket parallelism, settings. | ⬜ |

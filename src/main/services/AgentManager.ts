@@ -2,6 +2,7 @@ import { spawn, type ChildProcessByStdio } from 'node:child_process'
 import type { Readable } from 'node:stream'
 import { EventEmitter } from 'node:events'
 import { randomUUID } from 'node:crypto'
+import { existsSync } from 'node:fs'
 import {
   createLineBuffer,
   isErrorResult,
@@ -35,6 +36,8 @@ interface ManagedAgent {
    * make SIGKILL escalation dead code.
    */
   exited: boolean
+  /** The cwd the agent was spawned in (for clearer spawn-error messages). */
+  cwd: string
 }
 
 /**
@@ -48,8 +51,28 @@ interface ManagedAgent {
  *   'event' -> AgentEventMsg   (every stdout line + stderr chunk)
  *   'state' -> AgentStateMsg   (lifecycle transitions)
  */
+/** Per-agent retained events, so a (re)mounted terminal pane can backfill. */
+const LOG_RING_MAX = 2000
+/** Max number of agents whose logs we keep after they exit (oldest evicted). */
+const LOG_AGENTS_MAX = 100
+
 export class AgentManager extends EventEmitter {
   private agents = new Map<string, ManagedAgent>()
+  // Logs live separately from `agents` so they survive after the process exits
+  // (and the live ManagedAgent is deleted). Insertion-ordered for LRU eviction.
+  private logs = new Map<string, AgentEventMsg[]>()
+  // Monotonic per-agent event sequence (parallel lifetime to `logs`).
+  private seqByAgent = new Map<string, number>()
+
+  /** Buffered events for an agent (for pane backfill on mount). */
+  getLog(id: string): AgentEventMsg[] {
+    return this.logs.get(id) ?? []
+  }
+
+  /** OS pid of a live agent, or null. */
+  pidOf(id: string): number | null {
+    return this.agents.get(id)?.child.pid ?? null
+  }
 
   /**
    * Spawn a headless Claude Code agent isolated to `req.cwd`.
@@ -82,9 +105,28 @@ export class AgentManager extends EventEmitter {
       child,
       state: 'working',
       stdout: createLineBuffer(),
-      exited: false
+      exited: false,
+      cwd: req.cwd
     }
     this.agents.set(id, agent)
+
+    // Start a fresh log ring; evict the oldest *terminated* agent's logs if over
+    // the cap. Never evict a live agent (it would reset its seq and drop output).
+    this.logs.set(id, [])
+    this.seqByAgent.set(id, 0)
+    while (this.logs.size > LOG_AGENTS_MAX) {
+      let evicted = false
+      for (const key of this.logs.keys()) {
+        if (!this.agents.has(key)) {
+          this.logs.delete(key)
+          this.seqByAgent.delete(key)
+          evicted = true
+          break
+        }
+      }
+      if (!evicted) break // all remaining logs belong to live agents
+    }
+
     this.setState(id, 'working')
 
     child.stdout.setEncoding('utf8')
@@ -154,10 +196,16 @@ export class AgentManager extends EventEmitter {
 
   private onSpawnError(agent: ManagedAgent, err: NodeJS.ErrnoException): void {
     agent.exited = true
-    const detail =
-      err.code === 'ENOENT'
-        ? '`claude` was not found on PATH. Install Claude Code and ensure `claude` is runnable from a terminal.'
-        : `Failed to spawn agent: ${err.message}`
+    // ENOENT can mean either the cwd is gone or `claude` isn't on PATH.
+    let detail: string
+    if (err.code === 'ENOENT' && !existsSync(agent.cwd)) {
+      detail = `Repo path no longer exists: ${agent.cwd}`
+    } else if (err.code === 'ENOENT') {
+      detail =
+        '`claude` was not found on PATH. Install Claude Code and ensure `claude` is runnable from a terminal.'
+    } else {
+      detail = `Failed to spawn agent: ${err.message}`
+    }
     this.setState(agent.id, 'error', { error: detail })
     // ENOENT/spawn failures may emit 'error' without a following 'close', so
     // clean up here to avoid leaking the agent record.
@@ -207,7 +255,16 @@ export class AgentManager extends EventEmitter {
     this.emit('state', { agentId: id, state, ...extra } satisfies AgentStateMsg)
   }
 
-  private emitEvent(msg: AgentEventMsg): void {
+  private emitEvent(partial: Omit<AgentEventMsg, 'seq'>): void {
+    const seq = (this.seqByAgent.get(partial.agentId) ?? 0) + 1
+    this.seqByAgent.set(partial.agentId, seq)
+    const msg: AgentEventMsg = { ...partial, seq }
+
+    const ring = this.logs.get(msg.agentId)
+    if (ring) {
+      ring.push(msg)
+      if (ring.length > LOG_RING_MAX) ring.shift()
+    }
     this.emit('event', msg)
   }
 }

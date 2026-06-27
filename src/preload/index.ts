@@ -3,10 +3,15 @@ import type {
   AddRepoInput,
   AgentEventMsg,
   AgentStateMsg,
+  CreateTicketInput,
   CreateWorkspaceInput,
+  LaunchResult,
   Repo,
   SpawnAgentRequest,
   SpawnAgentResult,
+  Ticket,
+  TicketStateMsg,
+  TicketWithAgents,
   Workspace,
   WorkspaceWithRepos
 } from '@shared/types'
@@ -25,6 +30,8 @@ const api = {
     ipcRenderer.invoke('agent:spawn', req),
   killAgent: (agentId: string): Promise<void> =>
     ipcRenderer.invoke('agent:kill', agentId),
+  getAgentLog: (agentId: string): Promise<AgentEventMsg[]> =>
+    ipcRenderer.invoke('agent:log', agentId),
   onAgentEvent: (cb: (msg: AgentEventMsg) => void): (() => void) =>
     subscribe<AgentEventMsg>('agent:event', cb),
   onAgentState: (cb: (msg: AgentStateMsg) => void): (() => void) =>
@@ -38,7 +45,21 @@ const api = {
   addRepo: (input: AddRepoInput): Promise<Repo> =>
     ipcRenderer.invoke('repo:add', input),
   pickDirectory: (): Promise<string | null> =>
-    ipcRenderer.invoke('dialog:pickDirectory')
+    ipcRenderer.invoke('dialog:pickDirectory'),
+
+  // Tickets (Phase 3)
+  listTickets: (workspaceId: string): Promise<TicketWithAgents[]> =>
+    ipcRenderer.invoke('ticket:list', workspaceId),
+  createTicket: (input: CreateTicketInput): Promise<Ticket> =>
+    ipcRenderer.invoke('ticket:create', input),
+  getTicket: (ticketId: string): Promise<TicketWithAgents | null> =>
+    ipcRenderer.invoke('ticket:get', ticketId),
+  launchTicket: (ticketId: string): Promise<LaunchResult> =>
+    ipcRenderer.invoke('ticket:launch', ticketId),
+  markTicketDone: (ticketId: string): Promise<void> =>
+    ipcRenderer.invoke('ticket:markDone', ticketId),
+  onTicketState: (cb: (msg: TicketStateMsg) => void): (() => void) =>
+    subscribe<TicketStateMsg>('ticket:state', cb)
 }
 
 export type PluriApi = typeof api

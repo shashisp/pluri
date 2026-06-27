@@ -10,18 +10,14 @@ interface TerminalPaneProps {
 }
 
 /**
- * A single live xterm.js terminal that renders one agent's Claude Code output.
- * Subscribes to `agent:event` for the matching agentId and writes formatted,
- * colored text. Auto-fits on container resize.
+ * A live xterm.js terminal for one agent. On (re)mount or agent switch it
+ * backfills from the agent's retained log, then streams live events — using the
+ * per-event `seq` to dedup the overlap between backfill and live, and queuing
+ * live events until backfill completes so ordering is preserved.
  */
 export function TerminalPane({ agentId }: TerminalPaneProps): JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
-  const fitRef = useRef<FitAddon | null>(null)
-  // Keep the active agentId in a ref so the IPC handler (registered once) reads
-  // the latest value without re-subscribing on every change.
-  const agentIdRef = useRef<string | null>(agentId)
-  agentIdRef.current = agentId
 
   // Create the terminal once.
   useEffect(() => {
@@ -33,19 +29,14 @@ export function TerminalPane({ agentId }: TerminalPaneProps): JSX.Element {
       fontFamily:
         'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
       fontSize: 12,
-      scrollback: 5000,
-      theme: {
-        background: '#0a0a0a',
-        foreground: '#e5e5e5',
-        cursor: '#0a0a0a'
-      }
+      scrollback: 8000,
+      theme: { background: '#0a0a0a', foreground: '#e5e5e5', cursor: '#0a0a0a' }
     })
     const fit = new FitAddon()
     term.loadAddon(fit)
     term.open(containerRef.current)
     fit.fit()
     termRef.current = term
-    fitRef.current = fit
 
     const ro = new ResizeObserver(() => {
       try {
@@ -60,24 +51,47 @@ export function TerminalPane({ agentId }: TerminalPaneProps): JSX.Element {
       ro.disconnect()
       term.dispose()
       termRef.current = null
-      fitRef.current = null
     }
   }, [])
 
-  // Subscribe to agent events once; filter by the current agentId.
+  // Backfill + live stream for the current agent.
   useEffect(() => {
-    const unsubscribe = window.api.onAgentEvent((msg: AgentEventMsg) => {
-      if (msg.agentId !== agentIdRef.current) return
-      const text = formatEvent(msg)
-      if (text) termRef.current?.write(text)
-    })
-    return unsubscribe
-  }, [])
+    const term = termRef.current
+    if (!term) return
+    term.clear()
+    term.reset()
+    if (!agentId) return
 
-  // Clear the pane when switching to a different (or no) agent.
-  useEffect(() => {
-    termRef.current?.clear()
-    termRef.current?.reset()
+    let cancelled = false
+    let ready = false
+    let lastSeq = -1
+    const pending: AgentEventMsg[] = []
+
+    const writeMsg = (m: AgentEventMsg): void => {
+      if (m.seq <= lastSeq) return // already shown via backfill
+      const text = formatEvent(m)
+      if (text) term.write(text)
+      lastSeq = m.seq
+    }
+
+    const unsubscribe = window.api.onAgentEvent((m: AgentEventMsg) => {
+      if (cancelled || m.agentId !== agentId) return
+      if (ready) writeMsg(m)
+      else pending.push(m)
+    })
+
+    void window.api.getAgentLog(agentId).then((log) => {
+      if (cancelled) return
+      for (const m of log) writeMsg(m)
+      ready = true
+      for (const m of pending) writeMsg(m)
+      pending.length = 0
+    })
+
+    return () => {
+      cancelled = true
+      unsubscribe()
+    }
   }, [agentId])
 
   return (

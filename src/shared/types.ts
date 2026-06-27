@@ -75,6 +75,8 @@ export interface SpawnAgentResult {
 /** Raw + parsed line streamed to the renderer for a terminal pane. */
 export interface AgentEventMsg {
   agentId: string
+  /** Monotonic per-agent sequence — lets a remounted pane dedup backfill vs live. */
+  seq: number
   /** The original line (stdout) or chunk (stderr); never JSON-mangled. */
   raw: string
   /** Source stream. */
@@ -92,12 +94,22 @@ export interface AgentStateMsg {
   error?: string
   /** Exit code when the process closed. */
   exitCode?: number | null
+  /** MR/PR URL once opened (Phase 4). */
+  mrUrl?: string | null
 }
 
 // ---- Persisted data model (Phase 2+) ---------------------------------------
 
 export type GitHost = 'github' | 'gitlab'
 export type TicketState = 'draft' | 'running' | 'awaiting_review' | 'done'
+
+/**
+ * How agents in a ticket are spawned.
+ *  concurrent     — all at once (Phase 3).
+ *  producer_first — spawn the contract producer first, consumers after the
+ *                   contract exists (Phase 5).
+ */
+export type OrderingMode = 'concurrent' | 'producer_first'
 
 export interface Workspace {
   id: string
@@ -128,6 +140,7 @@ export interface Ticket {
   /** Repo.id values this ticket targets. */
   targetRepoIds: string[]
   state: TicketState
+  orderingMode: OrderingMode
   createdAt: number
 }
 
@@ -157,4 +170,36 @@ export interface AddRepoInput {
   gitHost: GitHost
   defaultBranch: string
   isContractProducer: boolean
+}
+
+export interface CreateTicketInput {
+  workspaceId: string
+  title: string
+  spec: string
+  targetRepoIds: string[]
+  orderingMode: OrderingMode
+}
+
+/** An agent record joined with its repo, for panes and status dots. */
+export interface AgentWithRepo extends AgentRecord {
+  repoName: string
+  repoPath: string
+  gitHost: GitHost
+  defaultBranch: string
+}
+
+/** A ticket with its agents (live + persisted) — what the board/detail render. */
+export interface TicketWithAgents extends Ticket {
+  agents: AgentWithRepo[]
+}
+
+export interface LaunchResult {
+  ticketId: string
+  agents: AgentWithRepo[]
+}
+
+/** main -> renderer ticket lifecycle event. */
+export interface TicketStateMsg {
+  ticketId: string
+  state: TicketState
 }
