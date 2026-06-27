@@ -32,6 +32,12 @@ const api = {
     ipcRenderer.invoke('agent:kill', agentId),
   getAgentLog: (agentId: string): Promise<AgentEventMsg[]> =>
     ipcRenderer.invoke('agent:log', agentId),
+  openMr: (agentId: string): Promise<void> =>
+    ipcRenderer.invoke('agent:openMr', agentId),
+  agentDiff: (agentId: string): Promise<string> =>
+    ipcRenderer.invoke('agent:diff', agentId),
+  openExternal: (url: string): Promise<void> =>
+    ipcRenderer.invoke('app:openExternal', url),
   onAgentEvent: (cb: (msg: AgentEventMsg) => void): (() => void) =>
     subscribe<AgentEventMsg>('agent:event', cb),
   onAgentState: (cb: (msg: AgentStateMsg) => void): (() => void) =>

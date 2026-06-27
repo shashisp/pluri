@@ -1,6 +1,7 @@
-import { dialog, ipcMain, type BrowserWindow } from 'electron'
+import { dialog, ipcMain, shell, type BrowserWindow } from 'electron'
 import { AgentManager } from './services/AgentManager'
 import { TicketLauncher } from './services/TicketLauncher'
+import { GitService } from './services/GitService'
 import type { Db } from './services/db'
 import type {
   AddRepoInput,
@@ -74,9 +75,10 @@ export function registerIpc(
     if (win && !win.isDestroyed()) win.webContents.send(channel, payload)
   }
 
-  // Launcher updates the DB on agent-state changes and rolls tickets up; it also
-  // emits 'ticket:state' straight to the renderer via `send`.
-  const launcher = new TicketLauncher(manager, db, send)
+  // Launcher updates the DB on agent-state changes, drives push+MR, and rolls
+  // tickets up; it emits 'agent:state'/'ticket:state' straight to the renderer.
+  const git = new GitService()
+  const launcher = new TicketLauncher(manager, db, send, git)
 
   manager.on('event', (msg: AgentEventMsg) => send('agent:event', msg))
   manager.on('state', (msg: AgentStateMsg) => send('agent:state', msg))
@@ -94,6 +96,16 @@ export function registerIpc(
   ipcMain.handle('agent:log', (_e, agentId: string): AgentEventMsg[] =>
     manager.getLog(agentId)
   )
+  ipcMain.handle('agent:openMr', (_e, agentId: string): Promise<void> => {
+    if (typeof agentId !== 'string') throw new Error('agentId required')
+    return launcher.openMr(agentId)
+  })
+  ipcMain.handle('agent:diff', (_e, agentId: string): Promise<string> => {
+    if (typeof agentId !== 'string') throw new Error('agentId required')
+    const agent = db.getAgent(agentId)
+    if (!agent) throw new Error('Agent not found')
+    return git.diff(agent.repoPath, agent.defaultBranch, agent.branch ?? agent.defaultBranch)
+  })
 
   // ---- Workspaces / Repos (Phase 2) ----------------------------------------
   ipcMain.handle('workspace:list', (): WorkspaceWithRepos[] =>
@@ -117,6 +129,11 @@ export function registerIpc(
     return result.filePaths[0]
   })
 
+  // Open an MR/PR (or any http) link in the OS browser.
+  ipcMain.handle('app:openExternal', (_e, url: string): void => {
+    if (typeof url === 'string' && /^https?:\/\//.test(url)) void shell.openExternal(url)
+  })
+
   // ---- Tickets (Phase 3) ----------------------------------------------------
   ipcMain.handle('ticket:list', (_e, workspaceId: string): TicketWithAgents[] => {
     if (typeof workspaceId !== 'string') throw new Error('workspaceId required')
@@ -131,7 +148,7 @@ export function registerIpc(
     (_e, ticketId: string): TicketWithAgents | null =>
       db.getTicketWithAgents(ticketId)
   )
-  ipcMain.handle('ticket:launch', (_e, ticketId: string): LaunchResult => {
+  ipcMain.handle('ticket:launch', (_e, ticketId: string): Promise<LaunchResult> => {
     if (typeof ticketId !== 'string') throw new Error('ticketId required')
     return launcher.launch(ticketId)
   })

@@ -341,6 +341,16 @@ export class Db {
     this.db.prepare(`UPDATE Agent SET ${sets.join(', ')} WHERE id = @id`).run(params)
   }
 
+  getAgent(id: string): AgentWithRepo | null {
+    const row = this.db
+      .prepare(
+        `SELECT a.*, r.name AS repoName, r.path AS repoPath, r.gitHost AS gitHost, r.defaultBranch AS defaultBranch
+         FROM Agent a JOIN Repo r ON a.repoId = r.id WHERE a.id = ?`
+      )
+      .get(id) as AgentWithRepoRow | undefined
+    return row ? this.rowToAgentWithRepo(row) : null
+  }
+
   listAgentsByTicket(ticketId: string): AgentWithRepo[] {
     const rows = this.db
       .prepare(

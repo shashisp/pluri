@@ -9,12 +9,17 @@ interface TicketDetailProps {
   ticket: TicketWithAgents
   ticketState: TicketState
   agentStates: Record<string, AgentState>
+  agentMrUrls: Record<string, string>
+  agentErrors: Record<string, string>
   /** True while a launch for this ticket is in flight. */
   launching: boolean
   onBack: () => void
   onKill: (agentId: string) => void
   onRelaunch: (ticketId: string) => void
   onMarkDone: (ticketId: string) => void
+  onViewDiff: (agentId: string) => void
+  onCreateMr: (agentId: string) => void
+  onOpenLink: (url: string) => void
 }
 
 /** Column count for an N-pane responsive grid. */
@@ -30,11 +35,16 @@ export function TicketDetail({
   ticket,
   ticketState,
   agentStates,
+  agentMrUrls,
+  agentErrors,
   launching,
   onBack,
   onKill,
   onRelaunch,
-  onMarkDone
+  onMarkDone,
+  onViewDiff,
+  onCreateMr,
+  onOpenLink
 }: TicketDetailProps): JSX.Element {
   const cols = columnsFor(ticket.agents.length)
   const anyRunning = ticket.agents.some(
@@ -92,7 +102,12 @@ export function TicketDetail({
               key={agent.id}
               agent={agent}
               state={agentStates[agent.id] ?? agent.state}
+              mrUrl={agentMrUrls[agent.id] ?? agent.mrUrl}
+              errorText={agentErrors[agent.id]}
               onKill={onKill}
+              onViewDiff={onViewDiff}
+              onCreateMr={onCreateMr}
+              onOpenLink={onOpenLink}
             />
           ))}
         </div>

@@ -60,18 +60,21 @@ const launcher = new TicketLauncher(manager, db, (ch, payload) => {
   if (ch === 'ticket:state') ticketStates.push((payload as { state: string }).state)
 })
 
-const result = launcher.launch(ticket.id)
+const result = await launcher.launch(ticket.id)
 assert(result.agents.length === 2, 'launch spawned one agent per target repo')
 
+// Poll the DB until the ticket rolls up (push+MR finalize is async). These temp
+// repos have no 'origin' remote, so each agent finishes as 'done' (committed
+// locally, nothing to push), and the ticket rolls up to awaiting_review.
 await new Promise<void>((resolve) => {
-  const timer = setTimeout(resolve, 180000)
-  manager.on('state', () => {
-    const agents = db.listAgentsByTicket(ticket.id)
-    if (agents.length === 2 && agents.every((a) => TERMINAL.includes(a.state))) {
-      clearTimeout(timer)
-      setTimeout(resolve, 250) // allow rollup emit to land
+  const start = Date.now()
+  const timer = setInterval(() => {
+    const t = db.getTicket(ticket.id)
+    if (t?.state === 'awaiting_review' || Date.now() - start > 180000) {
+      clearInterval(timer)
+      resolve()
     }
-  })
+  }, 500)
 })
 
 const agents = db.listAgentsByTicket(ticket.id)

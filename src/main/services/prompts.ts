@@ -17,10 +17,10 @@ export function branchName(ticket: Ticket): string {
 }
 
 /**
- * The per-repo scope prompt passed via `--append-system-prompt`. Each agent is
- * isolated to its repo's `cwd`; the prompt tells it to self-branch so the
- * working tree stays clean (Phase 4 will move branch creation to the app and
- * add push + MR/PR; Phase 5 adds the shared contract file).
+ * The per-repo scope prompt passed via `--append-system-prompt`. The
+ * orchestrator has already created and checked out the feature branch (Phase 4),
+ * so the agent must NOT branch, push, or open a PR — it implements and commits;
+ * the app pushes and opens the MR/PR. (Phase 5 adds the shared contract file.)
  */
 export function buildScopePrompt(
   repo: Repo,
@@ -38,10 +38,10 @@ export function buildScopePrompt(
     `Ticket: ${ticket.title}`,
     ``,
     `Process:`,
-    `1. Create and check out a new git branch named "${branch}" (e.g. \`git checkout -b ${branch}\`). Do all work on that branch.`,
+    `1. You are already on the branch "${branch}" — do NOT create or switch branches.`,
     `2. If a file exists at ../.orchestrator/tickets/${ticket.id}/contract.md, read it first and conform to it.`,
     `3. Implement the ticket within this repository only.`,
-    `4. When finished, stage and commit your work on the branch with a clear message.`,
+    `4. When finished, stage and commit your work with a clear message.`,
     `   Do NOT push and do NOT open a pull request — the orchestrator handles that.`,
     `Then stop.`
   ].join('\n')

@@ -12,6 +12,7 @@ import { AgentSandbox } from './components/AgentSandbox'
 import { TicketBoard } from './components/TicketBoard'
 import { TicketDetail } from './components/TicketDetail'
 import { NewTicketForm } from './components/NewTicketForm'
+import { DiffModal } from './components/DiffModal'
 
 type View = 'board' | 'sandbox'
 
@@ -28,7 +29,11 @@ export default function App(): JSX.Element {
 
   // Live overlays keyed by id; take precedence over persisted state.
   const [agentStates, setAgentStates] = useState<Record<string, AgentState>>({})
+  const [agentMrUrls, setAgentMrUrls] = useState<Record<string, string>>({})
+  const [agentErrors, setAgentErrors] = useState<Record<string, string>>({})
   const [ticketStates, setTicketStates] = useState<Record<string, TicketState>>({})
+
+  const [diff, setDiff] = useState<{ title: string; text: string } | null>(null)
 
   const refreshWorkspaces = useCallback(async (): Promise<void> => {
     setWorkspaces(await window.api.listWorkspaces())
@@ -48,9 +53,11 @@ export default function App(): JSX.Element {
 
   // Live subscriptions (registered once).
   useEffect(() => {
-    const offAgent = window.api.onAgentState((msg: AgentStateMsg) =>
+    const offAgent = window.api.onAgentState((msg: AgentStateMsg) => {
       setAgentStates((prev) => ({ ...prev, [msg.agentId]: msg.state }))
-    )
+      if (msg.mrUrl) setAgentMrUrls((prev) => ({ ...prev, [msg.agentId]: msg.mrUrl! }))
+      if (msg.error) setAgentErrors((prev) => ({ ...prev, [msg.agentId]: msg.error! }))
+    })
     const offTicket = window.api.onTicketState((msg: TicketStateMsg) =>
       setTicketStates((prev) => ({ ...prev, [msg.ticketId]: msg.state }))
     )
@@ -99,6 +106,17 @@ export default function App(): JSX.Element {
     await refreshTickets(selectedWsId)
   }
 
+  async function viewDiff(agentId: string): Promise<void> {
+    const agent = selectedTicket?.agents.find((a) => a.id === agentId)
+    setDiff({ title: agent?.repoName ?? 'agent', text: 'Loading diff…' })
+    try {
+      const text = await window.api.agentDiff(agentId)
+      setDiff({ title: agent?.repoName ?? 'agent', text: text || '(no differences)' })
+    } catch (err) {
+      setDiff({ title: agent?.repoName ?? 'agent', text: String(err) })
+    }
+  }
+
   return (
     <div className="flex h-full flex-col bg-[#0a0a0a] text-neutral-200">
       <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-2">
@@ -145,6 +163,8 @@ export default function App(): JSX.Element {
               ticket={selectedTicket}
               ticketState={ticketStates[selectedTicket.id] ?? selectedTicket.state}
               agentStates={agentStates}
+              agentMrUrls={agentMrUrls}
+              agentErrors={agentErrors}
               launching={launchingTicketId === selectedTicket.id}
               onBack={() => {
                 setSelectedTicketId(null)
@@ -153,6 +173,9 @@ export default function App(): JSX.Element {
               onKill={(agentId) => void window.api.killAgent(agentId)}
               onRelaunch={(id) => void relaunch(id)}
               onMarkDone={(id) => void markDone(id)}
+              onViewDiff={(id) => void viewDiff(id)}
+              onCreateMr={(id) => void window.api.openMr(id)}
+              onOpenLink={(url) => void window.api.openExternal(url)}
             />
           ) : (
             <TicketBoard
@@ -172,6 +195,10 @@ export default function App(): JSX.Element {
           onClose={() => setShowNewTicket(false)}
           onDone={handleTicketDone}
         />
+      )}
+
+      {diff && (
+        <DiffModal title={diff.title} diff={diff.text} onClose={() => setDiff(null)} />
       )}
     </div>
   )

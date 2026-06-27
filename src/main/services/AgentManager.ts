@@ -69,6 +69,16 @@ export class AgentManager extends EventEmitter {
     return this.logs.get(id) ?? []
   }
 
+  /**
+   * Inject an orchestrator note into an agent's stream (e.g. push/MR progress).
+   * Goes through the same ring + seq + 'event' path so it backfills and renders
+   * in the pane. Safe to call after the process has exited (logs outlive it).
+   */
+  appendNote(id: string, text: string): void {
+    if (!this.logs.has(id)) return
+    this.emitEvent({ agentId: id, raw: `» ${text}`, stream: 'stdout', parsed: null })
+  }
+
   /** OS pid of a live agent, or null. */
   pidOf(id: string): number | null {
     return this.agents.get(id)?.child.pid ?? null
