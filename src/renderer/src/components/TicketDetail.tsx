@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type {
   AgentState,
   TicketState,
@@ -11,6 +12,7 @@ interface TicketDetailProps {
   agentStates: Record<string, AgentState>
   agentMrUrls: Record<string, string>
   agentErrors: Record<string, string>
+  contractContent: string
   /** True while a launch for this ticket is in flight. */
   launching: boolean
   onBack: () => void
@@ -37,6 +39,7 @@ export function TicketDetail({
   agentStates,
   agentMrUrls,
   agentErrors,
+  contractContent,
   launching,
   onBack,
   onKill,
@@ -46,6 +49,7 @@ export function TicketDetail({
   onCreateMr,
   onOpenLink
 }: TicketDetailProps): JSX.Element {
+  const [tab, setTab] = useState<'agents' | 'contract'>('agents')
   const cols = columnsFor(ticket.agents.length)
   const anyRunning = ticket.agents.some(
     (a) => (agentStates[a.id] ?? a.state) === 'working'
@@ -65,6 +69,23 @@ export function TicketDetail({
         <span className="rounded bg-neutral-800 px-2 py-0.5 text-[10px] text-neutral-400">
           {ticketState.replace('_', ' ')}
         </span>
+
+        <div className="ml-3 flex gap-1 text-xs">
+          {(['agents', 'contract'] as const).map((t) => (
+            <button
+              key={t}
+              className={`rounded px-2 py-1 ${
+                tab === t
+                  ? 'bg-neutral-800 text-neutral-100'
+                  : 'text-neutral-500 hover:text-neutral-300'
+              }`}
+              onClick={() => setTab(t)}
+            >
+              {t === 'agents' ? 'Agents' : 'Contract'}
+            </button>
+          ))}
+        </div>
+
         <div className="ml-auto flex items-center gap-2">
           <button
             className="rounded bg-neutral-800 px-2 py-1 text-xs hover:bg-neutral-700 disabled:opacity-40"
@@ -88,7 +109,21 @@ export function TicketDetail({
         </div>
       </div>
 
-      {ticket.agents.length === 0 ? (
+      {tab === 'contract' ? (
+        <div className="min-h-0 flex-1 overflow-auto p-2">
+          {contractContent.trim() ? (
+            <pre className="m-0 whitespace-pre-wrap break-words text-[12px] leading-relaxed text-neutral-300">
+              {contractContent}
+            </pre>
+          ) : (
+            <div className="flex h-full items-center justify-center text-sm text-neutral-600">
+              No contract yet. The producer agent writes{' '}
+              <code className="mx-1 text-neutral-400">contract.md</code> early; it
+              streams here live.
+            </div>
+          )}
+        </div>
+      ) : ticket.agents.length === 0 ? (
         <div className="flex flex-1 items-center justify-center text-sm text-neutral-600">
           No agents yet — launch this ticket to spawn one agent per target repo.
         </div>

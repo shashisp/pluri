@@ -8,6 +8,7 @@ import { join } from 'node:path'
 import { AgentManager } from '../src/main/services/AgentManager'
 import { Db } from '../src/main/services/db'
 import { TicketLauncher } from '../src/main/services/TicketLauncher'
+import { ContractService } from '../src/main/services/ContractService'
 
 let fail = 0
 const assert = (c: boolean, m: string): void => {
@@ -56,9 +57,14 @@ const ticket = db.createTicket({
 
 const manager = new AgentManager()
 const ticketStates: string[] = []
-const launcher = new TicketLauncher(manager, db, (ch, payload) => {
-  if (ch === 'ticket:state') ticketStates.push((payload as { state: string }).state)
-})
+const launcher = new TicketLauncher(
+  manager,
+  db,
+  (ch, payload) => {
+    if (ch === 'ticket:state') ticketStates.push((payload as { state: string }).state)
+  },
+  new ContractService(db)
+)
 
 const result = await launcher.launch(ticket.id)
 assert(result.agents.length === 2, 'launch spawned one agent per target repo')

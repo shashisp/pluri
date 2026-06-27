@@ -93,6 +93,7 @@ export class AgentManager extends EventEmitter {
 
     const args = ['-p', req.prompt]
     if (req.systemPrompt) args.push('--append-system-prompt', req.systemPrompt)
+    for (const dir of req.addDirs ?? []) args.push('--add-dir', dir)
     args.push(
       '--allowedTools',
       req.allowedTools ?? 'Read',

@@ -1,7 +1,8 @@
-import { dialog, ipcMain, shell, type BrowserWindow } from 'electron'
+import { app, dialog, ipcMain, shell, type BrowserWindow } from 'electron'
 import { AgentManager } from './services/AgentManager'
 import { TicketLauncher } from './services/TicketLauncher'
 import { GitService } from './services/GitService'
+import { ContractService } from './services/ContractService'
 import type { Db } from './services/db'
 import type {
   AddRepoInput,
@@ -76,9 +77,13 @@ export function registerIpc(
   }
 
   // Launcher updates the DB on agent-state changes, drives push+MR, and rolls
-  // tickets up; it emits 'agent:state'/'ticket:state' straight to the renderer.
+  // tickets up; it emits 'agent:state'/'ticket:state'/'ticket:agents' to the
+  // renderer. ContractService owns the shared .orchestrator/ folder per ticket.
   const git = new GitService()
-  const launcher = new TicketLauncher(manager, db, send, git)
+  const contracts = new ContractService(db)
+  const launcher = new TicketLauncher(manager, db, send, contracts, git)
+
+  app.on('before-quit', () => contracts.closeAll())
 
   manager.on('event', (msg: AgentEventMsg) => send('agent:event', msg))
   manager.on('state', (msg: AgentStateMsg) => send('agent:state', msg))
@@ -156,6 +161,16 @@ export function registerIpc(
     if (typeof ticketId !== 'string') throw new Error('ticketId required')
     db.setTicketState(ticketId, 'done')
     send('ticket:state', { ticketId, state: 'done' })
+  })
+
+  // ---- Contract (Phase 5) ---------------------------------------------------
+  ipcMain.handle('contract:read', (_e, ticketId: string): Promise<string> => {
+    if (typeof ticketId !== 'string') throw new Error('ticketId required')
+    // Watch only this ticket (the UI views one at a time) for live updates.
+    contracts.watchOnly(ticketId, (content) =>
+      send('contract:update', { ticketId, content })
+    )
+    return contracts.read(ticketId)
   })
 
   return manager

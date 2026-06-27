@@ -66,6 +66,8 @@ export interface SpawnAgentRequest {
   systemPrompt?: string
   /** Comma-separated allowed tools; defaults to a read-only set in Phase 1. */
   allowedTools?: string
+  /** Extra directories the agent may read/write (`--add-dir`), e.g. the contract folder. */
+  addDirs?: string[]
 }
 
 export interface SpawnAgentResult {
@@ -202,4 +204,16 @@ export interface LaunchResult {
 export interface TicketStateMsg {
   ticketId: string
   state: TicketState
+}
+
+/** main -> renderer: a ticket's agent list changed (e.g. producer_first consumers). */
+export interface TicketAgentsMsg {
+  ticketId: string
+  agents: AgentWithRepo[]
+}
+
+/** main -> renderer: live contract.md content for a ticket. */
+export interface ContractUpdateMsg {
+  ticketId: string
+  content: string
 }

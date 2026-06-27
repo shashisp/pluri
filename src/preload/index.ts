@@ -3,6 +3,7 @@ import type {
   AddRepoInput,
   AgentEventMsg,
   AgentStateMsg,
+  ContractUpdateMsg,
   CreateTicketInput,
   CreateWorkspaceInput,
   LaunchResult,
@@ -10,6 +11,7 @@ import type {
   SpawnAgentRequest,
   SpawnAgentResult,
   Ticket,
+  TicketAgentsMsg,
   TicketStateMsg,
   TicketWithAgents,
   Workspace,
@@ -65,7 +67,15 @@ const api = {
   markTicketDone: (ticketId: string): Promise<void> =>
     ipcRenderer.invoke('ticket:markDone', ticketId),
   onTicketState: (cb: (msg: TicketStateMsg) => void): (() => void) =>
-    subscribe<TicketStateMsg>('ticket:state', cb)
+    subscribe<TicketStateMsg>('ticket:state', cb),
+  onTicketAgents: (cb: (msg: TicketAgentsMsg) => void): (() => void) =>
+    subscribe<TicketAgentsMsg>('ticket:agents', cb),
+
+  // Contract (Phase 5)
+  readContract: (ticketId: string): Promise<string> =>
+    ipcRenderer.invoke('contract:read', ticketId),
+  onContractUpdate: (cb: (msg: ContractUpdateMsg) => void): (() => void) =>
+    subscribe<ContractUpdateMsg>('contract:update', cb)
 }
 
 export type PluriApi = typeof api

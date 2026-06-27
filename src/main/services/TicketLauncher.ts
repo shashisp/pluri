@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto'
+import { dirname } from 'node:path'
 import type { AgentManager } from './AgentManager'
 import type { Db } from './db'
+import type { ContractService } from './ContractService'
 import { GitService } from './GitService'
 import { MrService } from './MrService'
 import { branchName, buildScopePrompt } from './prompts'
@@ -10,12 +12,17 @@ import type {
   AgentStateMsg,
   AgentWithRepo,
   LaunchResult,
+  Repo,
   Ticket,
   TicketState
 } from '@shared/types'
 
 /** Tools agents may use to implement a ticket. */
 const AGENT_TOOLS = 'Bash,Edit,Read,Write'
+
+/** producer_first: how long to wait for contract.md before spawning consumers. */
+const CONTRACT_WAIT_MS = 180_000
+const CONTRACT_POLL_MS = 1500
 
 /** States in which an agent's work is settled (used for ticket rollup). */
 function isSettled(state: AgentState): boolean {
@@ -48,11 +55,18 @@ export class TicketLauncher {
   private busyRepos = new Set<string>()
   // Agents whose finalize() (push+MR) is in flight — prevents double PRs.
   private finalizing = new Set<string>()
+  // Per-ticket launch generation — a deferred consumer spawn (producer_first)
+  // aborts if the ticket was relaunched while it was waiting.
+  private launchGen = new Map<string, number>()
+  // Tickets (by gen) whose producer_first consumers haven't spawned yet — blocks
+  // premature rollup while only the producer is recorded.
+  private pendingConsumers = new Map<string, number>()
 
   constructor(
     private manager: AgentManager,
     private db: Db,
     private emit: (channel: string, payload: unknown) => void,
+    private contracts: ContractService,
     private git: GitService = new GitService(),
     private mr: MrService = new MrService()
   ) {
@@ -77,70 +91,48 @@ export class TicketLauncher {
       }
     }
     this.db.deleteAgentsForTicket(ticketId)
+    const gen = (this.launchGen.get(ticketId) ?? 0) + 1
+    this.launchGen.set(ticketId, gen)
 
     this.db.setTicketState(ticketId, 'running')
     this.emitTicketState(ticketId, 'running')
 
+    // Create the shared contract folder (ticket.md + status/); contractPath is
+    // the absolute contract.md the producer writes and consumers read.
+    const { contractPath, warnings: contractWarnings } = await this.contracts.init(
+      ticketId,
+      ticket
+    )
+
+    const branch = branchName(ticket)
+    const producer = repos.find((r) => r.isContractProducer)
+    const producerFirst =
+      ticket.orderingMode === 'producer_first' &&
+      !!producer &&
+      !!contractPath &&
+      repos.length > 1
+
     const launched: AgentWithRepo[] = []
-    for (const repo of repos) {
-      const branch = branchName(ticket)
 
-      // Refuse to share a working tree with another ticket's live agent.
-      if (this.busyRepos.has(repo.path)) {
-        const rec = this.makeRecord(randomUUID(), ticketId, repo.id, null, null, 'error')
-        this.db.insertAgent(rec)
-        this.emit('agent:state', {
-          agentId: rec.id,
-          state: 'error',
-          error: `Repo "${repo.name}" is busy with another running ticket; skipped.`
-        })
-        launched.push(this.withRepo(rec, repo.name, repo.path, repo.gitHost, repo.defaultBranch))
-        continue
-      }
-
-      // App-side auto-branch BEFORE the agent runs (Phase 4).
-      let warnings: string[] = []
-      let branchError: string | null = null
-      try {
-        const result = await this.git.prepareBranch(repo.path, repo.defaultBranch, branch)
-        warnings = result.warnings
-      } catch (e) {
-        branchError = `Could not prepare branch: ${msg(e)}`
-      }
-
-      if (branchError) {
-        // Record an errored agent without spawning a process. branch=null since
-        // it was never created (so Open MR/Diff stay disabled for it).
-        const rec = this.makeRecord(randomUUID(), ticketId, repo.id, null, null, 'error')
-        this.db.insertAgent(rec)
-        this.emit('agent:state', { agentId: rec.id, state: 'error', error: branchError })
-        launched.push(this.withRepo(rec, repo.name, repo.path, repo.gitHost, repo.defaultBranch))
-        continue
-      }
-
-      const agentId = this.manager.spawnAgent({
-        cwd: repo.path,
-        prompt: ticket.spec,
-        systemPrompt: buildScopePrompt(repo, ticket, branch),
-        allowedTools: AGENT_TOOLS
-      })
-      this.agentToTicket.set(agentId, { ticketId, repoId: repo.id, repoPath: repo.path })
-      this.busyRepos.add(repo.path)
-
-      for (const w of warnings) this.manager.appendNote(agentId, w)
-
-      const rec = this.makeRecord(
-        agentId,
-        ticketId,
-        repo.id,
-        branch,
-        this.manager.pidOf(agentId),
-        'working'
+    if (producerFirst && producer) {
+      // Spawn the producer now; spawn consumers once contract.md is written.
+      const producerAgent = await this.spawnFor(
+        producer, ticket, branch, contractPath, true, contractWarnings
       )
-      this.db.insertAgent(rec)
-      launched.push(
-        this.withRepo(rec, repo.name, repo.path, repo.gitHost, repo.defaultBranch)
+      launched.push(producerAgent)
+      const consumers = repos.filter((r) => r.id !== producer.id)
+      // Mark consumers pending so checkRollup doesn't roll the ticket up while
+      // only the producer is recorded.
+      this.pendingConsumers.set(ticketId, gen)
+      void this.spawnConsumersWhenReady(
+        ticketId, gen, ticket, branch, consumers, contractPath, producerAgent.id
       )
+    } else {
+      for (const repo of repos) {
+        launched.push(
+          await this.spawnFor(repo, ticket, branch, contractPath, false, contractWarnings)
+        )
+      }
     }
 
     // A launch where every repo failed branch-prep / was busy has no live agents
@@ -148,6 +140,119 @@ export class TicketLauncher {
     this.checkRollup(ticketId)
 
     return { ticketId, agents: launched }
+  }
+
+  /**
+   * Branch + spawn a single repo's agent (or record an errored agent if the repo
+   * is busy or branch prep fails). Returns the AgentWithRepo to surface in the UI.
+   */
+  private async spawnFor(
+    repo: Repo,
+    ticket: Ticket,
+    branch: string,
+    contractPath: string | null,
+    producerFirst: boolean,
+    extraNotes: string[] = []
+  ): Promise<AgentWithRepo> {
+    const errored = (reason: string): AgentWithRepo => {
+      const rec = this.makeRecord(randomUUID(), ticket.id, repo.id, null, null, 'error')
+      this.db.insertAgent(rec)
+      this.emit('agent:state', { agentId: rec.id, state: 'error', error: reason })
+      return this.withRepo(rec, repo.name, repo.path, repo.gitHost, repo.defaultBranch)
+    }
+
+    // Refuse to share a working tree with another ticket's live agent.
+    if (this.busyRepos.has(repo.path)) {
+      return errored(`Repo "${repo.name}" is busy with another running ticket; skipped.`)
+    }
+
+    // App-side auto-branch BEFORE the agent runs.
+    let warnings: string[] = []
+    try {
+      const result = await this.git.prepareBranch(repo.path, repo.defaultBranch, branch)
+      warnings = result.warnings
+    } catch (e) {
+      return errored(`Could not prepare branch: ${msg(e)}`)
+    }
+
+    const agentId = this.manager.spawnAgent({
+      cwd: repo.path,
+      prompt: ticket.spec,
+      systemPrompt: buildScopePrompt(repo, ticket, branch, contractPath, producerFirst),
+      allowedTools: AGENT_TOOLS,
+      // Grant access to the shared contract folder (defensive; out-of-cwd writes
+      // already work, but this is explicit and robust to stricter permissions).
+      addDirs: contractPath ? [dirname(contractPath)] : undefined
+    })
+    this.agentToTicket.set(agentId, { ticketId: ticket.id, repoId: repo.id, repoPath: repo.path })
+    this.busyRepos.add(repo.path)
+
+    for (const note of [...extraNotes, ...warnings]) this.manager.appendNote(agentId, note)
+
+    const rec = this.makeRecord(
+      agentId,
+      ticket.id,
+      repo.id,
+      branch,
+      this.manager.pidOf(agentId),
+      'working'
+    )
+    this.db.insertAgent(rec)
+    return this.withRepo(rec, repo.name, repo.path, repo.gitHost, repo.defaultBranch)
+  }
+
+  /** producer_first: wait for contract.md, then spawn the consumer agents. */
+  private async spawnConsumersWhenReady(
+    ticketId: string,
+    gen: number,
+    ticket: Ticket,
+    branch: string,
+    consumers: Repo[],
+    contractPath: string | null,
+    producerAgentId: string
+  ): Promise<void> {
+    try {
+      const start = Date.now()
+      let ready = false
+      let producerDied = false
+      while (Date.now() - start < CONTRACT_WAIT_MS) {
+        if (this.launchGen.get(ticketId) !== gen) return // superseded by a relaunch
+        if (await this.contracts.hasContract(ticketId)) {
+          ready = true
+          break
+        }
+        // Don't wait the full window if the producer already gave up.
+        const producer = this.db.getAgent(producerAgentId)
+        if (producer && isSettled(producer.state)) {
+          producerDied = true
+          break
+        }
+        await delay(CONTRACT_POLL_MS)
+      }
+      if (this.launchGen.get(ticketId) !== gen) return
+
+      const note = ready
+        ? 'contract is ready — starting consumer agents.'
+        : producerDied
+          ? 'producer finished without a contract — starting consumers now.'
+          : 'contract not produced within the wait window — starting consumers anyway.'
+      for (const repo of consumers) {
+        if (this.launchGen.get(ticketId) !== gen) return // relaunched mid-loop
+        await this.spawnFor(repo, ticket, branch, contractPath, true, [note])
+      }
+      // Tell the renderer about the newly spawned consumer agents.
+      this.emit('ticket:agents', {
+        ticketId,
+        agents: this.db.listAgentsByTicket(ticketId)
+      })
+    } finally {
+      // Clear the pending marker (only ours) and re-evaluate rollup now that
+      // consumers exist (or we aborted).
+      if (this.pendingConsumers.get(ticketId) === gen) {
+        this.pendingConsumers.delete(ticketId)
+        this.checkRollup(ticketId)
+      }
+    }
   }
 
   /** Public: (re)open the MR/PR for an agent — push + create PR. */
@@ -263,6 +368,8 @@ export class TicketLauncher {
   }
 
   private checkRollup(ticketId: string): void {
+    // Don't roll up while producer_first consumers are still pending to spawn.
+    if (this.pendingConsumers.has(ticketId)) return
     const agents = this.db.listAgentsByTicket(ticketId)
     if (agents.length > 0 && agents.every((a) => isSettled(a.state))) {
       const ticket = this.db.getTicket(ticketId)
@@ -307,6 +414,10 @@ export class TicketLauncher {
   private emitTicketState(ticketId: string, state: TicketState): void {
     this.emit('ticket:state', { ticketId, state })
   }
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 function buildBody(ticket: Ticket | null): string {

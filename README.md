@@ -5,8 +5,8 @@ multiple *independent* git repositories grouped into **workspaces**, with work
 organized by **ticket** (a ticket spans a chosen subset of a workspace's repos).
 Isolation is by repo folder (`cwd`) — no git worktrees, no cross-repo merge logic.
 
-> Status: **Phase 4** — git auto-branch on launch; on finish, push + open an
-> MR/PR via `gh`/`glab` and surface the link. See [Build phases](#build-phases).
+> Status: **Phase 5** — shared per-ticket contract folder, `producer_first`
+> ordering, and a live Contract tab. See [Build phases](#build-phases).
 
 ## Prerequisites
 
@@ -40,6 +40,7 @@ npm run test:fanout  # real fan-out: launch a ticket across 2 temp repos,
                      # 2 agents spawn, both finish, ticket rolls up
 npm run test:git     # GitService against a real local bare remote
                      # (branch / commitsAhead / push / diff) + URL parsing
+npm run test:contract # ContractService + producer_first ordering (fake agents)
 npm run rebuild      # rebuild better-sqlite3 for Electron (if ABI mismatch)
 ```
 
@@ -85,6 +86,7 @@ src/
       TicketLauncher.ts fan-out + git/MR flow: branch -> spawn -> push -> MR
       GitService.ts     simple-git: prepareBranch / commitsAhead / push / diff
       MrService.ts      gh pr create / glab mr create -> capture URL
+      ContractService.ts .orchestrator/tickets/<id>/ folder + contract watch
       prompts.ts        slug / branch name / per-repo scope prompt
   preload/
     index.ts         typed contextBridge -> window.api
@@ -107,6 +109,7 @@ scripts/
   test-db.ts         SQLite + ticket/agent CRUD test (Electron ABI)
   test-fanout.ts     real multi-repo fan-out e2e
   test-git.ts        GitService vs a real local bare remote + URL parsing
+  test-contract.ts   ContractService + producer_first ordering (fake agents)
   e2e-agent.ts       real AgentManager vs live claude
 ```
 
@@ -121,8 +124,8 @@ links to the OS browser. All process/git/file work lives in main behind IPC.
 | **1** | Electron+Vite+React skeleton; spawn one headless agent in a repo, parse stream-json, render live xterm output, Kill button. | ✅ |
 | **2** | SQLite data model; add workspaces/repos; persistence across restarts. | ✅ |
 | **3** | Tickets + multi-repo fan-out; N panes; status dots. | ✅ |
-| **4** | Auto-branch on spawn; push + open MR/PR via `gh`/`glab`; ticket roll-up. | ✅ this build |
-| 5 | Shared `.orchestrator/tickets/<id>/` contract folder; `producer_first` ordering; live Contract tab. | ⬜ |
+| **4** | Auto-branch on spawn; push + open MR/PR via `gh`/`glab`; ticket roll-up. | ✅ |
+| **5** | Shared `.orchestrator/tickets/<id>/` contract folder; `producer_first` ordering; live Contract tab. | ✅ this build |
 | 6 | View Diff, board grouping, restart restore, multi-ticket parallelism, settings. | ⬜ |
 
 ## Verifying Phase 1

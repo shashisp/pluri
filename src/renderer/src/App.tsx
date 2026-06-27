@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   AgentState,
   AgentStateMsg,
+  ContractUpdateMsg,
+  TicketAgentsMsg,
   TicketState,
   TicketStateMsg,
   TicketWithAgents,
@@ -34,6 +36,10 @@ export default function App(): JSX.Element {
   const [ticketStates, setTicketStates] = useState<Record<string, TicketState>>({})
 
   const [diff, setDiff] = useState<{ title: string; text: string } | null>(null)
+  const [contractContent, setContractContent] = useState('')
+
+  const selectedTicketIdRef = useRef<string | null>(selectedTicketId)
+  selectedTicketIdRef.current = selectedTicketId
 
   const refreshWorkspaces = useCallback(async (): Promise<void> => {
     setWorkspaces(await window.api.listWorkspaces())
@@ -61,11 +67,37 @@ export default function App(): JSX.Element {
     const offTicket = window.api.onTicketState((msg: TicketStateMsg) =>
       setTicketStates((prev) => ({ ...prev, [msg.ticketId]: msg.state }))
     )
+    // producer_first: consumers spawn later — update that ticket's agent list.
+    const offAgents = window.api.onTicketAgents((msg: TicketAgentsMsg) =>
+      setTickets((prev) =>
+        prev.map((t) => (t.id === msg.ticketId ? { ...t, agents: msg.agents } : t))
+      )
+    )
+    const offContract = window.api.onContractUpdate((msg: ContractUpdateMsg) => {
+      if (msg.ticketId === selectedTicketIdRef.current) setContractContent(msg.content)
+    })
     return () => {
       offAgent()
       offTicket()
+      offAgents()
+      offContract()
     }
   }, [])
+
+  // Load the contract whenever the selected ticket changes (live updates arrive
+  // via onContractUpdate above).
+  useEffect(() => {
+    setContractContent('')
+    if (!selectedTicketId) return
+    let active = true
+    const id = selectedTicketId
+    void window.api.readContract(id).then((content) => {
+      if (active && selectedTicketIdRef.current === id) setContractContent(content)
+    })
+    return () => {
+      active = false
+    }
+  }, [selectedTicketId])
 
   const selectedWs = useMemo(
     () => workspaces.find((w) => w.id === selectedWsId) ?? null,
@@ -165,6 +197,7 @@ export default function App(): JSX.Element {
               agentStates={agentStates}
               agentMrUrls={agentMrUrls}
               agentErrors={agentErrors}
+              contractContent={contractContent}
               launching={launchingTicketId === selectedTicket.id}
               onBack={() => {
                 setSelectedTicketId(null)
