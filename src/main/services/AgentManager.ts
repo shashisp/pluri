@@ -25,7 +25,10 @@ type AgentChild = ChildProcessByStdio<null, Readable, Readable>
 
 interface ManagedAgent {
   id: string
-  child: AgentChild
+  /** The request — kept so a queued agent can be spawned when a slot frees. */
+  req: SpawnAgentRequest
+  /** Undefined while queued; set once the process is actually spawned. */
+  child?: AgentChild
   state: AgentState
   stdout: LineBuffer
   killTimer?: NodeJS.Timeout
@@ -36,8 +39,10 @@ interface ManagedAgent {
    * make SIGKILL escalation dead code.
    */
   exited: boolean
-  /** The cwd the agent was spawned in (for clearer spawn-error messages). */
-  cwd: string
+  /** True while waiting for a concurrency slot (no process yet). */
+  queued: boolean
+  /** True while this agent occupies a concurrency slot (running). */
+  counted: boolean
 }
 
 /**
@@ -64,6 +69,18 @@ export class AgentManager extends EventEmitter {
   // Monotonic per-agent event sequence (parallel lifetime to `logs`).
   private seqByAgent = new Map<string, number>()
 
+  // Concurrency: at most `maxConcurrent` agents run at once; the rest queue.
+  private maxConcurrent = Infinity
+  private activeCount = 0
+  private queue: string[] = [] // agent ids waiting for a slot
+
+  /** Set the max number of concurrently running agents (re-pumps the queue). */
+  setMaxConcurrent(n: number): void {
+    // A finite n>=1 is a real cap; anything else (NaN/0/negative) means no cap.
+    this.maxConcurrent = Number.isFinite(n) && n >= 1 ? Math.floor(n) : Infinity
+    this.pump()
+  }
+
   /** Buffered events for an agent (for pane backfill on mount). */
   getLog(id: string): AgentEventMsg[] {
     return this.logs.get(id) ?? []
@@ -79,18 +96,64 @@ export class AgentManager extends EventEmitter {
     this.emitEvent({ agentId: id, raw: `» ${text}`, stream: 'stdout', parsed: null })
   }
 
-  /** OS pid of a live agent, or null. */
+  /** OS pid of a live agent, or null (also null while queued). */
   pidOf(id: string): number | null {
-    return this.agents.get(id)?.child.pid ?? null
+    return this.agents.get(id)?.child?.pid ?? null
+  }
+
+  /** Current state of a tracked agent (e.g. 'idle' while queued), or null. */
+  stateOf(id: string): AgentState | null {
+    return this.agents.get(id)?.state ?? null
   }
 
   /**
-   * Spawn a headless Claude Code agent isolated to `req.cwd`.
-   * Returns the generated agent id immediately; output arrives via 'event'.
+   * Register a headless Claude Code agent. Returns the generated id immediately.
+   * The process starts now if a concurrency slot is free, otherwise it waits in
+   * the queue (state 'idle') and starts when an earlier agent finishes.
    */
   spawnAgent(req: SpawnAgentRequest): string {
     const id = randomUUID()
+    const agent: ManagedAgent = {
+      id,
+      req,
+      state: 'idle',
+      stdout: createLineBuffer(),
+      exited: false,
+      queued: true,
+      counted: false
+    }
+    this.agents.set(id, agent)
 
+    // Start a fresh log ring; evict the oldest *terminated* agent's logs if over
+    // the cap. Never evict a live/queued agent (it would reset seq / drop output).
+    this.logs.set(id, [])
+    this.seqByAgent.set(id, 0)
+    while (this.logs.size > LOG_AGENTS_MAX) {
+      let evicted = false
+      for (const key of this.logs.keys()) {
+        if (!this.agents.has(key)) {
+          this.logs.delete(key)
+          this.seqByAgent.delete(key)
+          evicted = true
+          break
+        }
+      }
+      if (!evicted) break // all remaining logs belong to live/queued agents
+    }
+
+    if (this.activeCount < this.maxConcurrent) {
+      this.startSpawn(agent)
+    } else {
+      this.setState(id, 'idle')
+      this.queue.push(id)
+      this.appendNote(id, 'queued — waiting for a free concurrency slot…')
+    }
+    return id
+  }
+
+  /** Actually spawn the child process for a (queued or fresh) agent. */
+  private startSpawn(agent: ManagedAgent): void {
+    const { req } = agent
     const args = ['-p', req.prompt]
     if (req.systemPrompt) args.push('--append-system-prompt', req.systemPrompt)
     for (const dir of req.addDirs ?? []) args.push('--add-dir', dir)
@@ -111,34 +174,11 @@ export class AgentManager extends EventEmitter {
       stdio: ['ignore', 'pipe', 'pipe']
     })
 
-    const agent: ManagedAgent = {
-      id,
-      child,
-      state: 'working',
-      stdout: createLineBuffer(),
-      exited: false,
-      cwd: req.cwd
-    }
-    this.agents.set(id, agent)
-
-    // Start a fresh log ring; evict the oldest *terminated* agent's logs if over
-    // the cap. Never evict a live agent (it would reset its seq and drop output).
-    this.logs.set(id, [])
-    this.seqByAgent.set(id, 0)
-    while (this.logs.size > LOG_AGENTS_MAX) {
-      let evicted = false
-      for (const key of this.logs.keys()) {
-        if (!this.agents.has(key)) {
-          this.logs.delete(key)
-          this.seqByAgent.delete(key)
-          evicted = true
-          break
-        }
-      }
-      if (!evicted) break // all remaining logs belong to live agents
-    }
-
-    this.setState(id, 'working')
+    agent.child = child
+    agent.queued = false
+    agent.counted = true
+    this.activeCount++
+    this.setState(agent.id, 'working')
 
     child.stdout.setEncoding('utf8')
     child.stdout.on('data', (chunk: string) => this.onStdout(agent, chunk))
@@ -146,13 +186,31 @@ export class AgentManager extends EventEmitter {
     child.stderr.setEncoding('utf8')
     child.stderr.on('data', (chunk: string) => {
       // stderr is forwarded raw (warnings, tracebacks) — never parsed as JSON.
-      this.emitEvent({ agentId: id, raw: chunk, stream: 'stderr', parsed: null })
+      this.emitEvent({ agentId: agent.id, raw: chunk, stream: 'stderr', parsed: null })
     })
 
     child.on('error', (err: NodeJS.ErrnoException) => this.onSpawnError(agent, err))
     child.on('close', (code) => this.onClose(agent, code))
+  }
 
-    return id
+  /** Free this agent's concurrency slot and start the next queued agent. */
+  private releaseSlot(agent: ManagedAgent): void {
+    if (agent.counted) {
+      agent.counted = false
+      this.activeCount = Math.max(0, this.activeCount - 1)
+    }
+    this.pump()
+  }
+
+  /** Start queued agents while slots are available. */
+  private pump(): void {
+    while (this.activeCount < this.maxConcurrent && this.queue.length > 0) {
+      const id = this.queue.shift()
+      if (id === undefined) break
+      const agent = this.agents.get(id)
+      if (!agent || !agent.queued) continue // killed/removed while queued
+      this.startSpawn(agent)
+    }
   }
 
   /** Kill an agent (SIGTERM, then SIGKILL after a grace period). */
@@ -161,12 +219,21 @@ export class AgentManager extends EventEmitter {
     if (!agent) return
     if (agent.state === 'killed' || this.isTerminal(agent.state)) return
 
+    // Queued agent: it never started — just drop it from the queue.
+    if (agent.queued) {
+      agent.exited = true
+      this.queue = this.queue.filter((q) => q !== id)
+      this.setState(id, 'killed')
+      this.agents.delete(id)
+      return
+    }
+
     this.setState(id, 'killed')
-    agent.child.kill('SIGTERM')
+    agent.child?.kill('SIGTERM')
     // Escalate to SIGKILL if the process hasn't actually exited within the grace
     // window. Gate on our own `exited` flag, NOT child.killed (see ManagedAgent).
     agent.killTimer = setTimeout(() => {
-      if (!agent.exited) agent.child.kill('SIGKILL')
+      if (!agent.exited) agent.child?.kill('SIGKILL')
     }, KILL_GRACE_MS)
   }
 
@@ -174,7 +241,7 @@ export class AgentManager extends EventEmitter {
   killAll(): void {
     for (const agent of this.agents.values()) {
       if (agent.killTimer) clearTimeout(agent.killTimer)
-      if (!agent.exited) agent.child.kill('SIGKILL')
+      if (agent.child && !agent.exited) agent.child.kill('SIGKILL')
     }
   }
 
@@ -209,8 +276,8 @@ export class AgentManager extends EventEmitter {
     agent.exited = true
     // ENOENT can mean either the cwd is gone or `claude` isn't on PATH.
     let detail: string
-    if (err.code === 'ENOENT' && !existsSync(agent.cwd)) {
-      detail = `Repo path no longer exists: ${agent.cwd}`
+    if (err.code === 'ENOENT' && !existsSync(agent.req.cwd)) {
+      detail = `Repo path no longer exists: ${agent.req.cwd}`
     } else if (err.code === 'ENOENT') {
       detail =
         '`claude` was not found on PATH. Install Claude Code and ensure `claude` is runnable from a terminal.'
@@ -221,6 +288,7 @@ export class AgentManager extends EventEmitter {
     // ENOENT/spawn failures may emit 'error' without a following 'close', so
     // clean up here to avoid leaking the agent record.
     this.agents.delete(agent.id)
+    this.releaseSlot(agent)
   }
 
   private onClose(agent: ManagedAgent, code: number | null): void {
@@ -250,6 +318,8 @@ export class AgentManager extends EventEmitter {
 
     // Release the process + stream handles; final state was already emitted.
     this.agents.delete(agent.id)
+    // Free the concurrency slot and start the next queued agent.
+    this.releaseSlot(agent)
   }
 
   private isTerminal(state: AgentState): boolean {

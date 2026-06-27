@@ -161,6 +161,64 @@ function assert(cond: boolean, msg: string): void {
   const withAgents = db.listTicketsWithAgents(wsId)
   assert(withAgents.length === 1, 'listTicketsWithAgents returns the ticket')
 
+  // --- Settings (Phase 6) ----------------------------------------------------
+  assert(db.getSettings().maxConcurrentAgents === 6, 'default maxConcurrentAgents')
+  const savedSettings = db.saveSettings({ maxConcurrentAgents: 3, agentTools: 'Read' })
+  assert(
+    savedSettings.maxConcurrentAgents === 3 && savedSettings.agentTools === 'Read',
+    'saveSettings merges + returns'
+  )
+  assert(
+    db.getSettings().defaultOrderingMode === 'concurrent',
+    'unset setting keeps its default'
+  )
+
+  // --- Restart reconcile (Phase 6) -------------------------------------------
+  // Complete launch interrupted: an agent for each target repo (2) -> rolled up.
+  const mkAgent = (id: string, repoId: string): void =>
+    db.insertAgent({
+      id, ticketId: ticket.id, repoId, branch: 'b', pid: 1,
+      state: 'working', mrUrl: null, startedAt: Date.now(), endedAt: null
+    })
+  mkAgent('a-be', backendId)
+  mkAgent('a-fe', frontendId)
+  db.setTicketState(ticket.id, 'running')
+  db.reconcileInterrupted()
+  assert(
+    db.listAgentsByTicket(ticket.id).every((a) => a.state === 'error'),
+    'reconcile marks interrupted agents error'
+  )
+  assert(
+    db.getTicket(ticket.id)?.state === 'awaiting_review',
+    'reconcile rolls up a fully-launched interrupted ticket'
+  )
+
+  // Incomplete launch interrupted: fewer agents than target repos -> draft.
+  const t2 = db.createTicket({
+    workspaceId: wsId, title: 'Half', spec: 's',
+    targetRepoIds: [backendId, frontendId], orderingMode: 'producer_first'
+  })
+  db.insertAgent({
+    id: 'a-only', ticketId: t2.id, repoId: backendId, branch: 'b', pid: 1,
+    state: 'working', mrUrl: null, startedAt: Date.now(), endedAt: null
+  })
+  db.setTicketState(t2.id, 'running')
+  db.reconcileInterrupted()
+  assert(
+    db.getTicket(t2.id)?.state === 'draft',
+    'reconcile resets an incompletely-launched ticket to draft'
+  )
+
+  db.close()
+}
+
+// --- Session 3: settings persist across reopen ------------------------------
+{
+  const db = new Db(file)
+  assert(
+    db.getSettings().maxConcurrentAgents === 3 && db.getSettings().agentTools === 'Read',
+    'settings persisted across reopen'
+  )
   db.close()
 }
 

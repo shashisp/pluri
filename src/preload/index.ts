@@ -3,6 +3,7 @@ import type {
   AddRepoInput,
   AgentEventMsg,
   AgentStateMsg,
+  AppSettings,
   ContractUpdateMsg,
   CreateTicketInput,
   CreateWorkspaceInput,
@@ -75,7 +76,12 @@ const api = {
   readContract: (ticketId: string): Promise<string> =>
     ipcRenderer.invoke('contract:read', ticketId),
   onContractUpdate: (cb: (msg: ContractUpdateMsg) => void): (() => void) =>
-    subscribe<ContractUpdateMsg>('contract:update', cb)
+    subscribe<ContractUpdateMsg>('contract:update', cb),
+
+  // Settings (Phase 6)
+  getSettings: (): Promise<AppSettings> => ipcRenderer.invoke('settings:get'),
+  setSettings: (patch: Partial<AppSettings>): Promise<AppSettings> =>
+    ipcRenderer.invoke('settings:set', patch)
 }
 
 export type PluriApi = typeof api

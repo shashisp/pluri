@@ -114,6 +114,9 @@ class FakeManager extends EventEmitter {
   pidOf(): number | null {
     return null
   }
+  stateOf(): string {
+    return 'working'
+  }
   appendNote(): void {}
   killAgent(): void {}
   getLog(): unknown[] {

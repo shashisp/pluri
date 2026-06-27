@@ -81,6 +81,9 @@ app.whenReady().then(() => {
   // windowless app. Surface it and quit cleanly instead.
   try {
     db = new Db(join(app.getPath('userData'), 'pluri.db'))
+    // Agents/tickets left mid-run by a previous session can't be resumed —
+    // reconcile them so the restored board is accurate.
+    db.reconcileInterrupted()
   } catch (err) {
     dialog.showErrorBox(
       'Pluri failed to start',

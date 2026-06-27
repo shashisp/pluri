@@ -1,20 +1,22 @@
 import Database from 'better-sqlite3'
 import { randomUUID } from 'node:crypto'
-import type {
-  AddRepoInput,
-  AgentRecord,
-  AgentState,
-  AgentWithRepo,
-  CreateTicketInput,
-  CreateWorkspaceInput,
-  GitHost,
-  OrderingMode,
-  Repo,
-  Ticket,
-  TicketState,
-  TicketWithAgents,
-  Workspace,
-  WorkspaceWithRepos
+import {
+  DEFAULT_SETTINGS,
+  type AddRepoInput,
+  type AgentRecord,
+  type AgentState,
+  type AgentWithRepo,
+  type AppSettings,
+  type CreateTicketInput,
+  type CreateWorkspaceInput,
+  type GitHost,
+  type OrderingMode,
+  type Repo,
+  type Ticket,
+  type TicketState,
+  type TicketWithAgents,
+  type Workspace,
+  type WorkspaceWithRepos
 } from '@shared/types'
 
 // Raw row shapes (SQLite stores booleans as 0/1).
@@ -119,6 +121,11 @@ export class Db {
         endedAt   INTEGER
       );
       CREATE INDEX IF NOT EXISTS idx_agent_ticket ON Agent(ticketId);
+
+      CREATE TABLE IF NOT EXISTS Setting (
+        key   TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
     `)
 
     // Incremental migrations for DBs created by an earlier phase. The Ticket
@@ -387,6 +394,63 @@ export class Db {
     const ticket = this.getTicket(id)
     if (!ticket) return null
     return { ...ticket, agents: this.listAgentsByTicket(id) }
+  }
+
+  // ---- Settings -------------------------------------------------------------
+
+  getSettings(): AppSettings {
+    const row = this.db.prepare("SELECT value FROM Setting WHERE key = 'app'").get() as
+      | { value: string }
+      | undefined
+    if (!row) return { ...DEFAULT_SETTINGS }
+    try {
+      return { ...DEFAULT_SETTINGS, ...(JSON.parse(row.value) as Partial<AppSettings>) }
+    } catch {
+      return { ...DEFAULT_SETTINGS }
+    }
+  }
+
+  saveSettings(patch: Partial<AppSettings>): AppSettings {
+    const merged: AppSettings = { ...this.getSettings(), ...patch }
+    this.db
+      .prepare("INSERT INTO Setting (key, value) VALUES ('app', @v) ON CONFLICT(key) DO UPDATE SET value = @v")
+      .run({ v: JSON.stringify(merged) })
+    return merged
+  }
+
+  // ---- Startup reconciliation -----------------------------------------------
+
+  /**
+   * Agents left non-terminal in the DB (idle/working/awaiting_mr) are stale on
+   * startup — their processes died with the previous app session. Mark them
+   * errored and roll up any 'running' ticket whose agents are now all settled.
+   */
+  reconcileInterrupted(): void {
+    const now = Date.now()
+    this.db
+      .prepare(
+        "UPDATE Agent SET state = 'error', endedAt = COALESCE(endedAt, ?) WHERE state IN ('idle', 'working', 'awaiting_mr')"
+      )
+      .run(now)
+
+    const settled = ['mr_open', 'done', 'error', 'killed']
+    const running = this.db
+      .prepare("SELECT id FROM Ticket WHERE state = 'running'")
+      .all() as Array<{ id: string }>
+    for (const { id } of running) {
+      const ticket = this.getTicket(id)
+      if (!ticket) continue
+      const agents = this.listAgentsByTicket(id)
+      // Fewer recorded agents than target repos => the launch was interrupted
+      // mid-fan-out (e.g. producer_first quit before consumers spawned, or a
+      // crash between marking 'running' and the first insert). Don't roll it up
+      // as complete — reset to draft so it can be relaunched cleanly.
+      if (agents.length < ticket.targetRepoIds.length) {
+        this.setTicketState(id, 'draft')
+      } else if (agents.length > 0 && agents.every((a) => settled.includes(a.state))) {
+        this.setTicketState(id, 'awaiting_review')
+      }
+    }
   }
 
   close(): void {

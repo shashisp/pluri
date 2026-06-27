@@ -217,3 +217,20 @@ export interface ContractUpdateMsg {
   ticketId: string
   content: string
 }
+
+// ---- Settings (Phase 6) ----------------------------------------------------
+
+export interface AppSettings {
+  /** Max agents running at once; the rest queue. */
+  maxConcurrentAgents: number
+  /** Pre-selected ordering mode in the new-ticket form. */
+  defaultOrderingMode: OrderingMode
+  /** Comma-separated tools agents may use when implementing a ticket. */
+  agentTools: string
+}
+
+export const DEFAULT_SETTINGS: AppSettings = {
+  maxConcurrentAgents: 6,
+  defaultOrderingMode: 'concurrent',
+  agentTools: 'Bash,Edit,Read,Write'
+}

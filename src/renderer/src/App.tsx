@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   AgentState,
   AgentStateMsg,
+  AppSettings,
   ContractUpdateMsg,
   TicketAgentsMsg,
   TicketState,
@@ -9,12 +10,14 @@ import type {
   TicketWithAgents,
   WorkspaceWithRepos
 } from '@shared/types'
+import { DEFAULT_SETTINGS } from '@shared/types'
 import { Sidebar } from './components/Sidebar'
 import { AgentSandbox } from './components/AgentSandbox'
 import { TicketBoard } from './components/TicketBoard'
 import { TicketDetail } from './components/TicketDetail'
 import { NewTicketForm } from './components/NewTicketForm'
 import { DiffModal } from './components/DiffModal'
+import { SettingsModal } from './components/SettingsModal'
 
 type View = 'board' | 'sandbox'
 
@@ -37,6 +40,8 @@ export default function App(): JSX.Element {
 
   const [diff, setDiff] = useState<{ title: string; text: string } | null>(null)
   const [contractContent, setContractContent] = useState('')
+  const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS)
+  const [showSettings, setShowSettings] = useState(false)
 
   const selectedTicketIdRef = useRef<string | null>(selectedTicketId)
   selectedTicketIdRef.current = selectedTicketId
@@ -51,6 +56,7 @@ export default function App(): JSX.Element {
 
   useEffect(() => {
     void refreshWorkspaces()
+    void window.api.getSettings().then(setSettings)
   }, [refreshWorkspaces])
 
   useEffect(() => {
@@ -155,10 +161,10 @@ export default function App(): JSX.Element {
         <div className="flex items-center gap-3">
           <span className="text-sm font-semibold tracking-tight">Pluri</span>
           <span className="text-xs text-neutral-500">
-            Phase 3 — tickets &amp; multi-repo fan-out
+            Multi-repo agent orchestrator
           </span>
         </div>
-        <div className="flex gap-1 text-xs">
+        <div className="flex items-center gap-1 text-xs">
           {(['board', 'sandbox'] as View[]).map((v) => (
             <button
               key={v}
@@ -172,6 +178,13 @@ export default function App(): JSX.Element {
               {v === 'board' ? 'Board' : 'Agent sandbox'}
             </button>
           ))}
+          <button
+            className="ml-1 rounded px-2 py-1 text-neutral-500 hover:text-neutral-300"
+            onClick={() => setShowSettings(true)}
+            title="Settings"
+          >
+            ⚙
+          </button>
         </div>
       </div>
 
@@ -225,6 +238,7 @@ export default function App(): JSX.Element {
       {showNewTicket && selectedWs && (
         <NewTicketForm
           workspace={selectedWs}
+          defaultOrderingMode={settings.defaultOrderingMode}
           onClose={() => setShowNewTicket(false)}
           onDone={handleTicketDone}
         />
@@ -232,6 +246,14 @@ export default function App(): JSX.Element {
 
       {diff && (
         <DiffModal title={diff.title} diff={diff.text} onClose={() => setDiff(null)} />
+      )}
+
+      {showSettings && (
+        <SettingsModal
+          settings={settings}
+          onClose={() => setShowSettings(false)}
+          onSave={async (patch) => setSettings(await window.api.setSettings(patch))}
+        />
       )}
     </div>
   )

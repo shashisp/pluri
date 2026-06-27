@@ -3,6 +3,7 @@ import type { OrderingMode, WorkspaceWithRepos } from '@shared/types'
 
 interface NewTicketFormProps {
   workspace: WorkspaceWithRepos
+  defaultOrderingMode: OrderingMode
   onClose: () => void
   /** Called after create (and optional launch). */
   onDone: (ticketId: string, launched: boolean) => void | Promise<void>
@@ -10,6 +11,7 @@ interface NewTicketFormProps {
 
 export function NewTicketForm({
   workspace,
+  defaultOrderingMode,
   onClose,
   onDone
 }: NewTicketFormProps): JSX.Element {
@@ -18,7 +20,7 @@ export function NewTicketForm({
   const [targetRepoIds, setTargetRepoIds] = useState<string[]>(
     workspace.repos.map((r) => r.id) // default: target all repos
   )
-  const [orderingMode, setOrderingMode] = useState<OrderingMode>('concurrent')
+  const [orderingMode, setOrderingMode] = useState<OrderingMode>(defaultOrderingMode)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -132,8 +134,8 @@ export function NewTicketForm({
             ))}
           </div>
           <span className="text-[11px] text-neutral-600">
-            Producer-first ordering takes effect in Phase 5; Phase 3 launches
-            concurrently.
+            Producer-first spawns the contract producer, then the rest once
+            <code className="mx-1 text-neutral-400">contract.md</code> is written.
           </span>
         </div>
 

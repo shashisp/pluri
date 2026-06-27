@@ -8,6 +8,7 @@ import type {
   AddRepoInput,
   AgentEventMsg,
   AgentStateMsg,
+  AppSettings,
   CreateTicketInput,
   CreateWorkspaceInput,
   GitHost,
@@ -39,6 +40,28 @@ function assertAddRepoInput(input: unknown): asserts input is AddRepoInput {
     throw new Error(`Invalid gitHost: ${String(i.gitHost)}`)
   if (typeof i.isContractProducer !== 'boolean')
     throw new Error('isContractProducer must be a boolean')
+}
+
+/** Coerce a settings patch from the (untrusted) renderer into safe values. */
+function sanitizeSettingsPatch(patch: unknown): Partial<AppSettings> {
+  if (!patch || typeof patch !== 'object') throw new Error('Invalid settings')
+  const i = patch as Record<string, unknown>
+  const out: Partial<AppSettings> = {}
+  if (i.maxConcurrentAgents !== undefined) {
+    const n = Math.floor(Number(i.maxConcurrentAgents))
+    if (!Number.isFinite(n)) throw new Error('maxConcurrentAgents must be a number')
+    out.maxConcurrentAgents = Math.max(1, Math.min(64, n))
+  }
+  if (i.defaultOrderingMode !== undefined) {
+    if (!ORDERING_MODES.includes(i.defaultOrderingMode as OrderingMode))
+      throw new Error(`Invalid orderingMode: ${String(i.defaultOrderingMode)}`)
+    out.defaultOrderingMode = i.defaultOrderingMode as OrderingMode
+  }
+  if (i.agentTools !== undefined) {
+    if (typeof i.agentTools !== 'string') throw new Error('agentTools must be a string')
+    out.agentTools = i.agentTools.trim() || 'Bash,Edit,Read,Write'
+  }
+  return out
 }
 
 /** Validate CreateTicketInput coming from the (untrusted) renderer. */
@@ -82,6 +105,9 @@ export function registerIpc(
   const git = new GitService()
   const contracts = new ContractService(db)
   const launcher = new TicketLauncher(manager, db, send, contracts, git)
+
+  // Apply the persisted concurrency cap at startup.
+  manager.setMaxConcurrent(db.getSettings().maxConcurrentAgents)
 
   app.on('before-quit', () => contracts.closeAll())
 
@@ -161,6 +187,14 @@ export function registerIpc(
     if (typeof ticketId !== 'string') throw new Error('ticketId required')
     db.setTicketState(ticketId, 'done')
     send('ticket:state', { ticketId, state: 'done' })
+  })
+
+  // ---- Settings (Phase 6) ---------------------------------------------------
+  ipcMain.handle('settings:get', (): AppSettings => db.getSettings())
+  ipcMain.handle('settings:set', (_e, patch: unknown): AppSettings => {
+    const saved = db.saveSettings(sanitizeSettingsPatch(patch))
+    manager.setMaxConcurrent(saved.maxConcurrentAgents)
+    return saved
   })
 
   // ---- Contract (Phase 5) ---------------------------------------------------

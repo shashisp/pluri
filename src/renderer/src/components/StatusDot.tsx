@@ -1,7 +1,7 @@
 import type { AgentState } from '@shared/types'
 
 const STATE_META: Record<AgentState, { dot: string; label: string }> = {
-  idle: { dot: 'bg-neutral-500', label: 'idle' },
+  idle: { dot: 'bg-neutral-500', label: 'queued' },
   working: { dot: 'bg-yellow-400 animate-pulse', label: 'working' },
   awaiting_mr: { dot: 'bg-blue-400', label: 'awaiting MR' },
   mr_open: { dot: 'bg-green-500', label: 'MR open' },

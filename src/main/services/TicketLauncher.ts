@@ -179,7 +179,7 @@ export class TicketLauncher {
       cwd: repo.path,
       prompt: ticket.spec,
       systemPrompt: buildScopePrompt(repo, ticket, branch, contractPath, producerFirst),
-      allowedTools: AGENT_TOOLS,
+      allowedTools: this.db.getSettings().agentTools || AGENT_TOOLS,
       // Grant access to the shared contract folder (defensive; out-of-cwd writes
       // already work, but this is explicit and robust to stricter permissions).
       addDirs: contractPath ? [dirname(contractPath)] : undefined
@@ -189,13 +189,15 @@ export class TicketLauncher {
 
     for (const note of [...extraNotes, ...warnings]) this.manager.appendNote(agentId, note)
 
+    // The agent may be queued (state 'idle') if at the concurrency cap — record
+    // its actual current state, not a hardcoded 'working'.
     const rec = this.makeRecord(
       agentId,
       ticket.id,
       repo.id,
       branch,
       this.manager.pidOf(agentId),
-      'working'
+      this.manager.stateOf(agentId) ?? 'working'
     )
     this.db.insertAgent(rec)
     return this.withRepo(rec, repo.name, repo.path, repo.gitHost, repo.defaultBranch)
@@ -212,7 +214,7 @@ export class TicketLauncher {
     producerAgentId: string
   ): Promise<void> {
     try {
-      const start = Date.now()
+      let start = Date.now()
       let ready = false
       let producerDied = false
       while (Date.now() - start < CONTRACT_WAIT_MS) {
@@ -221,9 +223,13 @@ export class TicketLauncher {
           ready = true
           break
         }
-        // Don't wait the full window if the producer already gave up.
         const producer = this.db.getAgent(producerAgentId)
-        if (producer && isSettled(producer.state)) {
+        if (producer?.state === 'idle') {
+          // Producer is still queued (concurrency cap) — don't burn the window
+          // before it has even started writing the contract.
+          start = Date.now()
+        } else if (producer && isSettled(producer.state)) {
+          // Don't wait the full window if the producer already gave up.
           producerDied = true
           break
         }
@@ -291,6 +297,7 @@ export class TicketLauncher {
     if (!agent || !agent.branch) return
     if (agent.state === 'mr_open') return // already opened
     if (agent.state === 'working') return // process still live — wait for 'done'
+    if (agent.state === 'idle') return // queued — hasn't run yet
     const ticketId = agent.ticketId
 
     this.finalizing.add(agentId)

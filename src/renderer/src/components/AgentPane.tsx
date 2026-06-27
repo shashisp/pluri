@@ -27,9 +27,14 @@ export function AgentPane({
 }: AgentPaneProps): JSX.Element {
   const verb = agent.gitHost === 'github' ? 'PR' : 'MR'
   const hasBranch = Boolean(agent.branch)
-  // Can't open/diff an MR with no branch (e.g. branch-prep failed), nor while
-  // the agent is still working or mid-push.
-  const canCreateMr = hasBranch && state !== 'working' && state !== 'awaiting_mr'
+  const queued = state === 'idle'
+  // Can't open an MR with no branch (branch-prep failed), nor while the agent is
+  // queued ('idle'), still working, or mid-push — that would settle it early and
+  // orphan the eventual process.
+  const canCreateMr =
+    hasBranch && state !== 'working' && state !== 'awaiting_mr' && !queued
+  // Kill works for a running agent OR a queued one (the manager dequeues it).
+  const canKill = state === 'working' || queued
 
   return (
     <div className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-lg border border-neutral-800 bg-neutral-950">
@@ -47,7 +52,7 @@ export function AgentPane({
           <button
             className="rounded bg-neutral-800 px-2 py-0.5 text-[10px] hover:bg-neutral-700 disabled:cursor-not-allowed disabled:opacity-30"
             onClick={() => onViewDiff(agent.id)}
-            disabled={!hasBranch}
+            disabled={!hasBranch || queued}
           >
             Diff
           </button>
@@ -74,7 +79,7 @@ export function AgentPane({
           <button
             className="rounded bg-red-600/80 px-2 py-0.5 text-[10px] font-semibold text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-30"
             onClick={() => onKill(agent.id)}
-            disabled={state !== 'working'}
+            disabled={!canKill}
           >
             Kill
           </button>

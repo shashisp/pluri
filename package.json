@@ -18,6 +18,7 @@
     "test:fanout": "esbuild scripts/test-fanout.ts --bundle --platform=node --format=esm --external:better-sqlite3 --external:simple-git --alias:@shared=./src/shared --outfile=out/test-fanout.mjs && ELECTRON_RUN_AS_NODE=1 electron out/test-fanout.mjs",
     "test:git": "esbuild scripts/test-git.ts --bundle --platform=node --format=esm --external:simple-git --alias:@shared=./src/shared --outfile=out/test-git.mjs && node out/test-git.mjs",
     "test:contract": "esbuild scripts/test-contract.ts --bundle --platform=node --format=esm --external:better-sqlite3 --external:simple-git --alias:@shared=./src/shared --outfile=out/test-contract.mjs && ELECTRON_RUN_AS_NODE=1 electron out/test-contract.mjs",
+    "test:concurrency": "esbuild scripts/test-concurrency.ts --bundle --platform=node --format=esm --alias:@shared=./src/shared --outfile=out/test-concurrency.mjs && node out/test-concurrency.mjs",
     "rebuild": "electron-rebuild -f -w better-sqlite3",
     "postinstall": "electron-rebuild -f -w better-sqlite3"
   },
