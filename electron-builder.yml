@@ -1,0 +1,40 @@
+appId: sh.pluri.app
+productName: Pluri
+directories:
+  output: release
+  buildResources: build
+
+# Only ship the built output + the package manifest. node_modules is pulled in
+# automatically for the production dependencies referenced by out/.
+files:
+  - out/**/*
+  - package.json
+  - '!**/*.{map,md,ts,tsx}'
+
+# better-sqlite3 is a native addon — its .node binary cannot be loaded from
+# inside an asar archive, so unpack the whole package.
+asarUnpack:
+  - '**/node_modules/better-sqlite3/**'
+
+# electron-builder rebuilds native deps for the target Electron/ABI.
+npmRebuild: true
+
+mac:
+  category: public.app-category.developer-tools
+  target:
+    - dmg
+    - zip
+  # Local/unsigned build. To distribute, add a Developer ID and notarization.
+  identity: null
+
+win:
+  target:
+    - nsis
+
+linux:
+  target:
+    - AppImage
+  category: Development
+
+# Brand icon: drop a 512x512+ build/icon.png (and build/icon.icns for mac) to
+# replace the default Electron icon. Optional — builds fine without it.
