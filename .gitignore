@@ -3,4 +3,4 @@ out/
 dist/
 .DS_Store
 *.log
-.orchestrator/
+.pluri/

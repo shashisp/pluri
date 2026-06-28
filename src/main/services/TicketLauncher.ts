@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto'
-import { dirname } from 'node:path'
+import { existsSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import type { AgentManager } from './AgentManager'
 import type { Db } from './db'
 import type { ContractService } from './ContractService'
+import type { MemoryService } from './MemoryService'
 import { GitService } from './GitService'
 import { MrService } from './MrService'
 import { branchName, buildScopePrompt } from './prompts'
@@ -68,7 +70,8 @@ export class TicketLauncher {
     private emit: (channel: string, payload: unknown) => void,
     private contracts: ContractService,
     private git: GitService = new GitService(),
-    private mr: MrService = new MrService()
+    private mr: MrService = new MrService(),
+    private memory?: MemoryService
   ) {
     this.manager.on('state', (m: AgentStateMsg) => this.onAgentState(m))
   }
@@ -175,10 +178,27 @@ export class TicketLauncher {
       return errored(`Could not prepare branch: ${msg(e)}`)
     }
 
+    // Compose the layered context: workspace memory (tier 1), a CLAUDE.md
+    // reference (tier 2), the contract (tier 3). The ticket spec is the -p prompt.
+    const workspaceMemory = this.memory
+      ? await this.memory.read({ type: 'workspace', id: ticket.workspaceId })
+      : ''
+    const contractContent = contractPath ? await this.contracts.read(ticket.id) : ''
+    const hasClaudeMd = existsSync(join(repo.path, 'CLAUDE.md'))
+
     const agentId = this.manager.spawnAgent({
       cwd: repo.path,
       prompt: ticket.spec,
-      systemPrompt: buildScopePrompt(repo, ticket, branch, contractPath, producerFirst),
+      systemPrompt: buildScopePrompt({
+        repo,
+        ticket,
+        branch,
+        contractPath,
+        producerFirst,
+        workspaceMemory,
+        contractContent,
+        hasClaudeMd
+      }),
       allowedTools: this.db.getSettings().agentTools || AGENT_TOOLS,
       // Grant access to the shared contract folder (defensive; out-of-cwd writes
       // already work, but this is explicit and robust to stricter permissions).

@@ -5,6 +5,8 @@ import type {
   AgentStateMsg,
   AppSettings,
   ContractUpdateMsg,
+  MemoryScope,
+  MemoryUpdateMsg,
   CreateTicketInput,
   CreateWorkspaceInput,
   LaunchResult,
@@ -81,7 +83,15 @@ const api = {
   // Settings (Phase 6)
   getSettings: (): Promise<AppSettings> => ipcRenderer.invoke('settings:get'),
   setSettings: (patch: Partial<AppSettings>): Promise<AppSettings> =>
-    ipcRenderer.invoke('settings:set', patch)
+    ipcRenderer.invoke('settings:set', patch),
+
+  // Memory (context subsystem)
+  readMemory: (scope: MemoryScope): Promise<string> =>
+    ipcRenderer.invoke('memory:read', scope),
+  writeMemory: (scope: MemoryScope, content: string): Promise<void> =>
+    ipcRenderer.invoke('memory:write', scope, content),
+  onMemoryUpdate: (cb: (msg: MemoryUpdateMsg) => void): (() => void) =>
+    subscribe<MemoryUpdateMsg>('memory:update', cb)
 }
 
 export type PluriApi = typeof api

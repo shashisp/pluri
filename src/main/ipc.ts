@@ -3,6 +3,7 @@ import { AgentManager } from './services/AgentManager'
 import { TicketLauncher } from './services/TicketLauncher'
 import { GitService } from './services/GitService'
 import { ContractService } from './services/ContractService'
+import { MemoryService } from './services/MemoryService'
 import type { Db } from './services/db'
 import type {
   AddRepoInput,
@@ -13,6 +14,7 @@ import type {
   CreateWorkspaceInput,
   GitHost,
   LaunchResult,
+  MemoryScope,
   OrderingMode,
   Repo,
   SpawnAgentRequest,
@@ -22,6 +24,14 @@ import type {
   Workspace,
   WorkspaceWithRepos
 } from '@shared/types'
+
+/** Validate a MemoryScope coming from the (untrusted) renderer. */
+function assertMemoryScope(scope: unknown): asserts scope is MemoryScope {
+  if (!scope || typeof scope !== 'object') throw new Error('Invalid memory scope')
+  const s = scope as Record<string, unknown>
+  if (s.type !== 'workspace' && s.type !== 'repo') throw new Error('Invalid scope type')
+  if (typeof s.id !== 'string' || !s.id) throw new Error('scope id required')
+}
 
 const GIT_HOSTS: GitHost[] = ['github', 'gitlab']
 const ORDERING_MODES: OrderingMode[] = ['concurrent', 'producer_first']
@@ -101,15 +111,19 @@ export function registerIpc(
 
   // Launcher updates the DB on agent-state changes, drives push+MR, and rolls
   // tickets up; it emits 'agent:state'/'ticket:state'/'ticket:agents' to the
-  // renderer. ContractService owns the shared .orchestrator/ folder per ticket.
+  // renderer. ContractService owns the shared .pluri/ folder per ticket.
   const git = new GitService()
   const contracts = new ContractService(db)
-  const launcher = new TicketLauncher(manager, db, send, contracts, git)
+  const memory = new MemoryService(db, send)
+  const launcher = new TicketLauncher(manager, db, send, contracts, git, undefined, memory)
 
   // Apply the persisted concurrency cap at startup.
   manager.setMaxConcurrent(db.getSettings().maxConcurrentAgents)
 
-  app.on('before-quit', () => contracts.closeAll())
+  app.on('before-quit', () => {
+    contracts.closeAll()
+    memory.closeAll()
+  })
 
   manager.on('event', (msg: AgentEventMsg) => send('agent:event', msg))
   manager.on('state', (msg: AgentStateMsg) => send('agent:state', msg))
@@ -195,6 +209,18 @@ export function registerIpc(
     const saved = db.saveSettings(sanitizeSettingsPatch(patch))
     manager.setMaxConcurrent(saved.maxConcurrentAgents)
     return saved
+  })
+
+  // ---- Memory (context subsystem) -------------------------------------------
+  ipcMain.handle('memory:read', (_e, scope: unknown): Promise<string> => {
+    assertMemoryScope(scope)
+    memory.ensureWatch(scope) // live updates for the Memory tab
+    return memory.read(scope)
+  })
+  ipcMain.handle('memory:write', (_e, scope: unknown, content: unknown): Promise<void> => {
+    assertMemoryScope(scope)
+    if (typeof content !== 'string') throw new Error('content must be a string')
+    return memory.write(scope, content)
   })
 
   // ---- Contract (Phase 5) ---------------------------------------------------

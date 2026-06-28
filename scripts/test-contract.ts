@@ -63,8 +63,8 @@ const contracts = new ContractService(db)
 // init creates the folder structure.
 const initRes = await contracts.init(ticket.id, db.getTicket(ticket.id)!)
 assert(initRes.contractPath !== null, 'init returns a contract path')
-assert(existsSync(join(root, '.orchestrator', 'tickets', ticket.id, 'ticket.md')), 'ticket.md created')
-assert(existsSync(join(root, '.orchestrator', 'tickets', ticket.id, 'status')), 'status/ created')
+assert(existsSync(join(root, '.pluri', 'tickets', ticket.id, 'ticket.md')), 'ticket.md created')
+assert(existsSync(join(root, '.pluri', 'tickets', ticket.id, 'status')), 'status/ created')
 assert((await contracts.read(ticket.id)) === '', 'contract empty initially')
 assert((await contracts.hasContract(ticket.id)) === false, 'hasContract false initially')
 
@@ -79,7 +79,7 @@ assert(/GET \/login/.test(watched), 'watch reports contract.md content')
 stop()
 assert((await contracts.hasContract(ticket.id)) === true, 'hasContract true after write')
 
-// Nested repos: .orchestrator would land inside a repo -> contract disabled.
+// Nested repos: .pluri would land inside a repo -> contract disabled.
 {
   const wsN = db.createWorkspace({ name: 'N' })
   const mono = join(root, 'mono')
@@ -150,15 +150,16 @@ for (let i = 0; i < 60 && fake.spawns.length < 2; i++) await delay(100)
 assert(fake.spawns.length === 2, 'consumer spawns after contract.md is written')
 assert(fake.spawns[1]?.cwd === frontend, 'second spawn is the consumer (frontend)')
 assert(
-  /READ the shared contract/.test(fake.spawns[1]?.systemPrompt ?? ''),
-  'consumer prompt instructs reading the contract'
+  /POST \/session/.test(fake.spawns[1]?.systemPrompt ?? '') &&
+    /already been defined/.test(fake.spawns[1]?.systemPrompt ?? ''),
+  'consumer prompt has the contract content injected'
 )
 assert(
   events.some((e) => e.channel === 'ticket:agents'),
   'ticket:agents emitted when consumers spawn'
 )
 
-const ticketMd = readFileSync(join(root, '.orchestrator', 'tickets', ticket.id, 'ticket.md'), 'utf8')
+const ticketMd = readFileSync(join(root, '.pluri', 'tickets', ticket.id, 'ticket.md'), 'utf8')
 assert(/Add login/.test(ticketMd) && /Implement login/.test(ticketMd), 'ticket.md has title + spec')
 
 contracts.closeAll()

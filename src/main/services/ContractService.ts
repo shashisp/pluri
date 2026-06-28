@@ -1,29 +1,15 @@
 import { watch, type FSWatcher } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { dirname, join, sep } from 'node:path'
+import { join } from 'node:path'
 import type { Db } from './db'
 import type { Ticket } from '@shared/types'
+import { commonAncestor, ticketDir, workspaceRoot } from './paths'
 
 function msg(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
 }
 
-/**
- * Longest common directory of a set of absolute paths. The orchestrator places
- * `.orchestrator/` here (the "workspace root" the spec refers to), so agents in
- * sibling repos share one contract folder.
- */
-export function commonAncestor(paths: string[]): string {
-  if (paths.length === 0) throw new Error('no paths')
-  if (paths.length === 1) return dirname(paths[0])
-  const parts = paths.map((p) => p.split(sep))
-  const first = parts[0]
-  let i = 0
-  for (; i < first.length; i++) {
-    if (!parts.every((p) => p[i] === first[i])) break
-  }
-  return parts[0].slice(0, i).join(sep) || sep
-}
+export { commonAncestor }
 
 export interface ContractInitResult {
   contractPath: string | null
@@ -32,7 +18,7 @@ export interface ContractInitResult {
 
 /**
  * Owns the per-ticket shared folder:
- *   <workspaceRoot>/.orchestrator/tickets/<ticketId>/
+ *   <workspaceRoot>/.pluri/tickets/<ticketId>/
  *     ticket.md     (spec, written at launch)
  *     contract.md   (producer writes, consumers read)
  *     status/       (optional per-agent status)
@@ -45,25 +31,13 @@ export class ContractService {
 
   constructor(private db: Db) {}
 
-  /** Workspace root for a ticket = common ancestor of its target repos. */
-  private rootFor(ticketId: string): string | null {
+  dir(ticketId: string): string | null {
     const ticket = this.db.getTicket(ticketId)
     if (!ticket) return null
-    const repos = this.db
-      .listRepos(ticket.workspaceId)
-      .filter((r) => ticket.targetRepoIds.includes(r.id))
-    if (repos.length === 0) return null
-    const paths = repos.map((r) => r.path.replace(/[/\\]+$/, ''))
-    const root = commonAncestor(paths)
-    // If the root coincides with one of the repos (nested repos), `.orchestrator`
-    // would land INSIDE a repo where an agent could commit it — disable instead.
-    if (paths.includes(root)) return null
-    return root
-  }
-
-  dir(ticketId: string): string | null {
-    const root = this.rootFor(ticketId)
-    return root ? join(root, '.orchestrator', 'tickets', ticketId) : null
+    // Use the workspace-wide root so memory, tickets, and contracts share one
+    // `.pluri/` folder (and it never lands inside a nested repo).
+    const root = workspaceRoot(this.db, ticket.workspaceId)
+    return root ? ticketDir(root, ticketId) : null
   }
 
   contractPath(ticketId: string): string | null {

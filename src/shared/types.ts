@@ -117,6 +117,8 @@ export interface Workspace {
   id: string
   name: string
   createdAt: number
+  /** Pointer to .pluri/memory/workspace.md (null until first write/derivable). */
+  memoryPath: string | null
 }
 
 export interface Repo {
@@ -127,7 +129,16 @@ export interface Repo {
   gitHost: GitHost
   defaultBranch: string // e.g. "main"
   isContractProducer: boolean
+  /** Pointer to <repo>/CLAUDE.md. */
+  claudeMdPath: string | null
+  /** Last codebase-map generation (epoch ms); null = never indexed. */
+  indexedAt: number | null
 }
+
+/** Which memory file a read/write targets. */
+export type MemoryScope =
+  | { type: 'workspace'; id: string }
+  | { type: 'repo'; id: string }
 
 /** A workspace with its repos eagerly loaded — what the sidebar renders. */
 export interface WorkspaceWithRepos extends Workspace {
@@ -215,6 +226,12 @@ export interface TicketAgentsMsg {
 /** main -> renderer: live contract.md content for a ticket. */
 export interface ContractUpdateMsg {
   ticketId: string
+  content: string
+}
+
+/** main -> renderer: a memory file changed on disk (watcher or write). */
+export interface MemoryUpdateMsg {
+  scope: MemoryScope
   content: string
 }
 

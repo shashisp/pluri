@@ -19,8 +19,9 @@ import { TicketDetail } from './components/TicketDetail'
 import { NewTicketForm } from './components/NewTicketForm'
 import { DiffModal } from './components/DiffModal'
 import { SettingsModal } from './components/SettingsModal'
+import { MemoryView } from './components/MemoryView'
 
-type View = 'board' | 'sandbox'
+type View = 'board' | 'sandbox' | 'memory'
 
 export default function App(): JSX.Element {
   const [workspaces, setWorkspaces] = useState<WorkspaceWithRepos[]>([])
@@ -190,6 +191,8 @@ export default function App(): JSX.Element {
             <AgentSandbox />
           ) : !selectedWs ? (
             <div className="pk-placeholder">Select or create a workspace to begin.</div>
+          ) : view === 'memory' ? (
+            <MemoryView workspace={selectedWs} />
           ) : selectedTicket ? (
             <TicketDetail
               ticket={selectedTicket}

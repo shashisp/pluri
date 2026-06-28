@@ -1,8 +1,17 @@
-import { Boxes, ChevronRight, ChevronsUpDown, LayoutGrid, Plus, Settings, SquareTerminal } from 'lucide-react'
+import {
+  BookText,
+  Boxes,
+  ChevronRight,
+  ChevronsUpDown,
+  LayoutGrid,
+  Plus,
+  Settings,
+  SquareTerminal
+} from 'lucide-react'
 import { Button, IconButton } from './ui'
 import markUrl from '../assets/mark.svg'
 
-type View = 'board' | 'sandbox'
+type View = 'board' | 'sandbox' | 'memory'
 
 interface TopBarProps {
   workspaceName: string | null
@@ -62,6 +71,12 @@ export function TopBar({
           onClick={() => onSetView('board')}
         >
           <LayoutGrid size={14} /> Board
+        </button>
+        <button
+          className={`pluri-tab${view === 'memory' ? ' pluri-tab--active' : ''}`}
+          onClick={() => onSetView('memory')}
+        >
+          <BookText size={14} /> Memory
         </button>
         <button
           className={`pluri-tab${view === 'sandbox' ? ' pluri-tab--active' : ''}`}

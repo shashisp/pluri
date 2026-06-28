@@ -1,5 +1,6 @@
 import Database from 'better-sqlite3'
 import { randomUUID } from 'node:crypto'
+import { join } from 'node:path'
 import {
   DEFAULT_SETTINGS,
   type AddRepoInput,
@@ -28,6 +29,8 @@ interface RepoRow {
   gitHost: string
   defaultBranch: string
   isContractProducer: number
+  claudeMdPath: string | null
+  indexedAt: number | null
 }
 
 interface TicketRow {
@@ -131,6 +134,10 @@ export class Db {
     // Incremental migrations for DBs created by an earlier phase. The Ticket
     // table existed in Phase 2 without orderingMode, so add it idempotently.
     this.ensureColumn('Ticket', 'orderingMode', "TEXT NOT NULL DEFAULT 'concurrent'")
+    // Memory subsystem pointers (added later; no prose in the DB).
+    this.ensureColumn('Workspace', 'memoryPath', 'TEXT')
+    this.ensureColumn('Repo', 'claudeMdPath', 'TEXT')
+    this.ensureColumn('Repo', 'indexedAt', 'INTEGER')
   }
 
   /** Add a column if it doesn't already exist (CREATE TABLE IF NOT EXISTS won't). */
@@ -147,18 +154,24 @@ export class Db {
 
   listWorkspaces(): Workspace[] {
     return this.db
-      .prepare('SELECT id, name, createdAt FROM Workspace ORDER BY createdAt ASC')
+      .prepare('SELECT id, name, createdAt, memoryPath FROM Workspace ORDER BY createdAt ASC')
       .all() as Workspace[]
   }
 
   createWorkspace(input: CreateWorkspaceInput): Workspace {
     const name = input.name.trim()
     if (!name) throw new Error('Workspace name is required')
-    const ws: Workspace = { id: randomUUID(), name, createdAt: Date.now() }
+    const ws: Workspace = { id: randomUUID(), name, createdAt: Date.now(), memoryPath: null }
     this.db
       .prepare('INSERT INTO Workspace (id, name, createdAt) VALUES (?, ?, ?)')
       .run(ws.id, ws.name, ws.createdAt)
     return ws
+  }
+
+  setWorkspaceMemoryPath(workspaceId: string, memoryPath: string): void {
+    this.db
+      .prepare('UPDATE Workspace SET memoryPath = ? WHERE id = ?')
+      .run(memoryPath, workspaceId)
   }
 
   // ---- Repos ----------------------------------------------------------------
@@ -171,17 +184,33 @@ export class Db {
       path: row.path,
       gitHost: row.gitHost as GitHost,
       defaultBranch: row.defaultBranch,
-      isContractProducer: row.isContractProducer === 1
+      isContractProducer: row.isContractProducer === 1,
+      claudeMdPath: row.claudeMdPath ?? null,
+      indexedAt: row.indexedAt ?? null
     }
   }
 
+  private static REPO_COLS =
+    'id, workspaceId, name, path, gitHost, defaultBranch, isContractProducer, claudeMdPath, indexedAt'
+
   listRepos(workspaceId: string): Repo[] {
     const rows = this.db
-      .prepare(
-        'SELECT id, workspaceId, name, path, gitHost, defaultBranch, isContractProducer FROM Repo WHERE workspaceId = ? ORDER BY name ASC'
-      )
+      .prepare(`SELECT ${Db.REPO_COLS} FROM Repo WHERE workspaceId = ? ORDER BY name ASC`)
       .all(workspaceId) as RepoRow[]
     return rows.map((r) => this.rowToRepo(r))
+  }
+
+  getRepo(id: string): Repo | null {
+    const row = this.db
+      .prepare(`SELECT ${Db.REPO_COLS} FROM Repo WHERE id = ?`)
+      .get(id) as RepoRow | undefined
+    return row ? this.rowToRepo(row) : null
+  }
+
+  setRepoIndexed(repoId: string, indexedAt: number, claudeMdPath: string): void {
+    this.db
+      .prepare('UPDATE Repo SET indexedAt = ?, claudeMdPath = ? WHERE id = ?')
+      .run(indexedAt, claudeMdPath, repoId)
   }
 
   addRepo(input: AddRepoInput): Repo {
@@ -202,11 +231,13 @@ export class Db {
       path,
       gitHost: input.gitHost,
       defaultBranch: input.defaultBranch.trim() || 'main',
-      isContractProducer: input.isContractProducer
+      isContractProducer: input.isContractProducer,
+      claudeMdPath: join(path, 'CLAUDE.md'),
+      indexedAt: null
     }
     this.db
       .prepare(
-        'INSERT INTO Repo (id, workspaceId, name, path, gitHost, defaultBranch, isContractProducer) VALUES (?, ?, ?, ?, ?, ?, ?)'
+        'INSERT INTO Repo (id, workspaceId, name, path, gitHost, defaultBranch, isContractProducer, claudeMdPath) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
       )
       .run(
         repo.id,
@@ -215,7 +246,8 @@ export class Db {
         repo.path,
         repo.gitHost,
         repo.defaultBranch,
-        repo.isContractProducer ? 1 : 0
+        repo.isContractProducer ? 1 : 0,
+        repo.claudeMdPath
       )
     return repo
   }

@@ -131,7 +131,7 @@ export function TicketDetail({
               <div className="pk-contract__bar">
                 <FileText size={14} style={{ color: 'var(--text-muted)' }} />
                 <span className="pk-contract__path">
-                  .orchestrator/tickets/{ticket.id.slice(0, 8)}/contract.md
+                  .pluri/tickets/{ticket.id.slice(0, 8)}/contract.md
                 </span>
                 <span className="pk-contract__watch">
                   <span className="pk-livedot" /> watching
