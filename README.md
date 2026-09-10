@@ -8,6 +8,8 @@ Isolation is by repo folder (`cwd`) — no git worktrees, no cross-repo merge lo
 > Status: **Phase 6 (complete)** — restart restore, concurrency cap, and
 > settings. All six build phases are done. See [Build phases](#build-phases).
 
+![Pluri board view — a ticket fanned out across three repos, each agent with its own branch and MR status](docs/screenshot.png)
+
 ## Prerequisites
 
 - **Node.js ≥ 22** (uses `node --experimental-strip-types` for the parser test).
